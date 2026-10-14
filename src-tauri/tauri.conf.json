@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Forge",
+  "version": "0.1.0",
+  "identifier": "com.stellitron.forge",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Forge",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true,
+    "publisher": "Stellitron",
+    "copyright": "Copyright 2026 Stellitron Technologies Pvt Ltd. Licensed under Apache-2.0.",
+    "homepage": "https://forge.stellitron.com",
+    "category": "DeveloperTool",
+    "shortDescription": "Local-first API, MCP, A2A and agentic testing client",
+    "longDescription": "Forge is a free, open source API client by Stellitron. Test REST, GraphQL, WebSocket, MCP servers and A2A agents, keep everything as plain files in git, and optionally let an AI model help. No account, no cloud."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE3QkEwMjlEMEQ2OUJBOEMKUldTTXVta05uUUs2cDBpS0Y1bXFELzdLQys1SVo0MUtCL0J0VW5DY2JlSzBuck1vZHdzQUE2dUIK",
+      "endpoints": [
+        "https://github.com/stellitron/forge/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

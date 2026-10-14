@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in Forge doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting. Please remove tokens, passwords and private URLs from anything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a GET request to ...
+        2. Add the header ...
+        3. Press Send
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Forge version
+      description: Settings, About
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Windows, Linux]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output or screenshots
+      description: The console (Cmd or Ctrl + J) shows the full request and error.
