@@ -42,7 +42,7 @@
     "@uiw/react-codemirror": "^4.25.12",
     "docx": "^9.5.1",
     "exceljs": "^4.4.0",
-    "jspdf": "^3.0.3",
+    "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.2",
     "lucide-react": "^1.57.0",
     "pptxgenjs": "^4.0.1",
