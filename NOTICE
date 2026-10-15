@@ -1,0 +1,13 @@
+Forge
+Copyright 2026 Stellitron Technologies Pvt Ltd
+
+This product is developed by Stellitron (https://stellitron.com) and is licensed
+under the Apache License, Version 2.0. See the LICENSE file for the full text.
+
+"Forge", the Forge logo and "Stellitron" are trademarks of Stellitron. The Apache
+License does not grant permission to use them, except as required for reasonable
+and customary use in describing the origin of the work. Forks must use a
+different name and logo.
+
+Forge includes open source software from third parties, listed with their
+licenses in package-lock.json (JavaScript) and src-tauri/Cargo.lock (Rust).

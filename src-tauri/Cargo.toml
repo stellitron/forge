@@ -1,0 +1,55 @@
+[package]
+name = "forge"
+version = "0.1.0"
+description = "Forge: local-first API, MCP, A2A and agentic testing client"
+license = "Apache-2.0"
+repository = "https://github.com/stellitron/forge"
+homepage = "https://forge.stellitron.com"
+authors = ["Stellitron"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "forge_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.53.3", features = ["full"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "stream", "gzip", "brotli", "deflate", "zstd", "multipart", "http2", "form", "query", "cookies", "system-proxy"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3.34"
+base64 = "0.23.1"
+url = "2.5.8"
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-http = "2.7.0"
+uuid = { version = "1.26", features = ["v4"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+
+[dev-dependencies]
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "aws_lc_rs", "pem"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }

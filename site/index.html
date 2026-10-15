@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forge: test REST APIs, MCP servers and AI agents from one desktop app</title>
+  <meta name="description" content="Forge is a free, open source desktop client for REST, GraphQL, WebSocket, MCP servers and A2A agents. Requests are JSON files in your repository. Made by Stellitron.">
+  <meta name="theme-color" content="#f8f9f5">
+  <link rel="icon" href="assets/forge.svg" type="image/svg+xml">
+  <link rel="canonical" href="https://forge.stellitron.com/">
+  <link rel="preload" href="assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Stellitron">
+  <meta property="og:title" content="Forge: test REST APIs, MCP servers and AI agents from one desktop app">
+  <meta property="og:description" content="Free and open source. Requests are JSON files in your repository, tokens stay on your machine.">
+  <meta property="og:url" content="https://forge.stellitron.com/">
+  <meta property="og:image" content="https://forge.stellitron.com/assets/request-light.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <script>
+    // Same rule as stellitron.com: new visitors start in light mode, a saved choice is respected.
+    try { if (localStorage.getItem("theme") === "dark") document.documentElement.classList.add("dark"); } catch {}
+  </script>
+  <style>
+    @font-face { font-family: "Geist"; src: url("assets/fonts/geist-latin.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+    @font-face { font-family: "Geist Mono"; src: url("assets/fonts/geist-mono-latin.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+
+    /* Tokens from the Stellitron studio system (stellitron.com globals.css). */
+    :root {
+      color-scheme: light;
+      --background: #f8f9f5; --foreground: #18251d; --card: #ffffff;
+      --primary: #305d40; --primary-foreground: #ffffff;
+      --muted: #edf0e8; --muted-foreground: #5e695e;
+      --border: #dce1d7; --ring: #487553; --surface: #eef1e8;
+      --sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --serif: Georgia, "Times New Roman", serif;
+    }
+    .dark {
+      color-scheme: dark;
+      --background: #101913; --foreground: #eff2e9; --card: #17221a;
+      --primary: #c2e6a0; --primary-foreground: #16221a;
+      --muted: #233026; --muted-foreground: #a6b3a5;
+      --border: #334135; --ring: #c2e6a0; --surface: #17221a;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html { scroll-behavior: smooth; scroll-padding-top: 100px; }
+    body { background: var(--background); color: var(--foreground); font: 17px/1.65 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: clip; }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; height: auto; display: block; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    ::selection { background: #c4e5a7; color: #18251d; }
+    :focus-visible { outline: 2px solid var(--ring); outline-offset: 5px; }
+    h1, h2, h3 { text-wrap: balance; font-weight: 450; }
+    p { text-wrap: pretty; }
+    code { font: .88em var(--mono); background: var(--muted); border-radius: 4px; padding: 1px 5px; }
+    .container { width: min(1280px, calc(100% - 96px)); margin-inline: auto; }
+    .link { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+    .link:hover { color: var(--primary); text-decoration-color: currentColor; }
+    .skip { position: absolute; top: -100px; left: 20px; padding: 12px 20px; background: var(--foreground); color: var(--background); }
+    .skip:focus { top: 12px; z-index: 70; }
+
+    /* Header */
+    .header { position: fixed; inset: 0 0 auto; z-index: 60; background: color-mix(in srgb, var(--background) 92%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+    .header-inner { display: flex; align-items: center; justify-content: space-between; height: 76px; gap: 24px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 650; letter-spacing: -1.2px; }
+    .brand img { width: 30px; height: 30px; }
+    .brand small { font-size: 13px; font-weight: 450; letter-spacing: 0; color: var(--muted-foreground); margin-left: 2px; }
+    .nav { display: flex; align-items: center; gap: 28px; }
+    .nav a { padding-block: 12px; font-size: 14px; color: var(--muted-foreground); }
+    .nav a:hover { color: var(--foreground); }
+    .actions { display: flex; align-items: center; gap: 12px; }
+    .theme { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 5px; }
+    .theme:hover { background: var(--muted); }
+    .theme .sun, .dark .theme .moon { display: none; }
+    .dark .theme .sun { display: block; }
+    .button { display: inline-flex; align-items: center; gap: 14px; min-height: 48px; padding: 12px 20px; border-radius: 5px; background: var(--primary); color: var(--primary-foreground); font-size: 15px; font-weight: 550; transition: background .2s; }
+    .button:hover { background: color-mix(in srgb, var(--primary) 88%, var(--foreground)); }
+    .button.small { min-height: 40px; padding: 8px 16px; font-size: 14px; }
+    .button.quiet { background: transparent; color: var(--foreground); border: 1px solid var(--border); }
+    .button.quiet:hover { background: var(--muted); }
+
+    /* Intro */
+    .intro { padding: 148px 0 48px; max-width: 860px; }
+    .intro h1 { font-size: clamp(40px, 5vw, 64px); line-height: 1.08; letter-spacing: -2.6px; margin-bottom: 24px; }
+    .intro h1 em { font-family: var(--serif); font-weight: 400; color: var(--primary); }
+    .intro p { font-size: 19px; line-height: 1.7; color: var(--muted-foreground); max-width: 680px; }
+    .intro-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 30px; }
+    .intro-note { font-size: 14px; color: var(--muted-foreground); }
+    .hero-shot { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--card); box-shadow: 0 40px 80px -50px rgba(24, 37, 29, .5); }
+    .shot .on-dark, .dark .shot .on-light { display: none; }
+    .dark .shot .on-dark { display: block; }
+
+    /* Sections */
+    section { padding-block: 96px; }
+    .band { background: var(--surface); border-block: 1px solid var(--border); }
+    h2 { font-size: clamp(30px, 3.2vw, 42px); line-height: 1.15; letter-spacing: -1.4px; margin-bottom: 16px; }
+    .lead { font-size: 18px; line-height: 1.7; color: var(--muted-foreground); max-width: 640px; }
+
+    /* What's included: a dense two-column list */
+    .included { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 56px; margin-top: 44px; align-items: start; }
+    .features { border-top: 1px solid var(--border); }
+    .features div { display: grid; grid-template-columns: 150px 1fr; gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--border); }
+    .features dt { font-weight: 550; font-size: 16px; }
+    .features dd { margin: 0; font-size: 16px; line-height: 1.65; color: var(--muted-foreground); }
+    .figure { position: sticky; top: 110px; }
+    .figure .shot { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--card); }
+    .figure figcaption { margin-top: 12px; font-size: 14px; color: var(--muted-foreground); }
+
+    /* MCP section */
+    .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: start; }
+    .steps-text { margin-top: 24px; display: grid; gap: 18px; }
+    .steps-text p { font-size: 16px; line-height: 1.7; color: var(--muted-foreground); }
+    .steps-text b { color: var(--foreground); font-weight: 550; }
+    .terminal { border-radius: 8px; overflow: hidden; border: 1px solid #2b3a2f; background: #101913; color: #dfe8d6; font: 14px/1.75 var(--mono); }
+    .terminal header { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #2b3a2f; font-size: 12px; color: #93a491; }
+    .terminal pre { margin: 0; padding: 16px; overflow-x: auto; white-space: pre; }
+    .terminal .c { color: #7f9180; }
+    .terminal .p { color: #c2e6a0; }
+    .terminal + .terminal { margin-top: 16px; }
+
+    /* Files and privacy */
+    .tree { font: 14px/2 var(--mono); padding: 22px 26px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); white-space: pre; overflow-x: auto; }
+    .tree .ok { color: var(--primary); }
+    .tree .off { color: var(--muted-foreground); }
+    .facts { list-style: none; padding: 0; border-top: 1px solid var(--border); }
+    .facts li { padding: 16px 0; border-bottom: 1px solid var(--border); font-size: 16px; line-height: 1.65; color: var(--muted-foreground); }
+    .facts b { color: var(--foreground); font-weight: 550; }
+
+    /* Download */
+    .download { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: start; }
+    .platforms { display: grid; gap: 10px; margin-top: 26px; }
+    .platform { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-size: 16px; }
+    .platform:hover { border-color: var(--primary); }
+    .platform span { color: var(--muted-foreground); font-size: 14px; }
+    .platform.current { border-color: var(--primary); box-shadow: inset 3px 0 0 var(--primary); }
+    .maker { margin-top: 28px; font-size: 16px; line-height: 1.7; color: var(--muted-foreground); }
+
+    /* Footer */
+    .footer { padding-block: 56px 22px; border-top: 1px solid var(--border); background: var(--surface); }
+    .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; }
+    .footer-grid > div:first-child p { font-size: 15px; line-height: 1.7; color: var(--muted-foreground); margin: 18px 0; }
+    .footer-grid h2 { font-size: 14px; font-weight: 600; letter-spacing: 0; margin-bottom: 14px; }
+    .footer-grid > div:not(:first-child) a { display: flex; min-height: 34px; align-items: center; font-size: 14px; color: var(--muted-foreground); }
+    .footer-grid a:hover { color: var(--primary); }
+    .footer-bottom { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; margin-top: 44px; padding-top: 22px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted-foreground); }
+
+    @media (max-width: 1100px) {
+      .container { width: calc(100% - 64px); }
+      .included, .two, .download { gap: 40px; }
+    }
+    @media (max-width: 860px) {
+      .container { width: calc(100% - 40px); }
+      .header-inner { height: 68px; }
+      .brand small, .nav { display: none; }
+      .intro { padding-top: 112px; }
+      .intro h1 { letter-spacing: -1.6px; }
+      section { padding-block: 64px; }
+      .included, .two, .download { grid-template-columns: minmax(0, 1fr); }
+      .figure { position: static; }
+      .features div { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+      .footer-grid > div:first-child { grid-column: 1 / -1; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+
+  <header class="header">
+    <div class="container header-inner">
+      <a class="brand" href="#content" aria-label="Forge by Stellitron, top of page">
+        <img src="assets/forge.svg" alt="" width="30" height="30">
+        Forge
+        <small>by Stellitron</small>
+      </a>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="#included">What's included</a>
+        <a href="#mcp">MCP and agents</a>
+        <a href="#privacy">Files and privacy</a>
+        <a href="https://github.com/stellitron/forge/blob/main/docs/README.md">Docs</a>
+        <a href="https://github.com/stellitron/forge">GitHub</a>
+      </nav>
+      <div class="actions">
+        <button class="theme" id="theme" type="button" aria-label="Switch to dark theme">
+          <svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          <svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <a class="button small" href="#download">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="content">
+    <div class="container">
+      <div class="intro">
+        <h1>Test REST APIs, MCP servers and <em>AI agents</em> from one desktop app.</h1>
+        <p>Forge saves each request as a JSON file in your repository, so your API tests are reviewed and versioned with the code they test. Tokens stay in a local file that never reaches git. Free and open source under Apache 2.0.</p>
+        <div class="intro-actions">
+          <a class="button" id="dl" href="https://github.com/stellitron/forge/releases/latest"><span id="dl-label">Download Forge</span></a>
+          <a class="button quiet" href="https://github.com/stellitron/forge/blob/main/docs/getting-started.md">Read the setup guide</a>
+          <span class="intro-note" id="dl-note">macOS, Windows and Linux</span>
+        </div>
+      </div>
+      <div class="hero-shot shot">
+        <img class="on-light" src="assets/request-light.png" alt="Forge showing a GET request with its headers on the left and the JSON response on the right">
+        <img class="on-dark" src="assets/request-dark.png" alt="Forge showing a GET request with its headers on the left and the JSON response on the right">
+      </div>
+    </div>
+
+    <section id="included">
+      <div class="container">
+        <h2>What's included</h2>
+        <p class="lead">Everything below works without an AI model or an account.</p>
+        <div class="included">
+          <dl class="features">
+            <div><dt>Requests</dt><dd>REST and GraphQL with params synced to the URL, <code>:id</code> path variables, Bearer, Basic and API key auth, JSON, XML, form, multipart and file bodies. Paste a <code>curl</code> command to import it.</dd></div>
+            <div><dt>Environments</dt><dd><code>{{baseUrl}}</code> style variables for local, staging and production. Unknown variables are underlined before you send.</dd></div>
+            <div><dt>Tests</dt><dd>Assertions on status, headers, JSONPath, body, time and size. Generate them from a response, capture tokens into variables, run a folder as a suite.</dd></div>
+            <div><dt>Data and reports</dt><dd>JSON becomes a sortable table. Export to Excel, PDF, Word, PowerPoint, CSV or Markdown, computed from the data itself.</dd></div>
+            <div><dt>Other protocols</dt><dd>WebSocket with custom headers, A2A agents with streaming tasks, and website checks for headers, caching, security and broken links.</dd></div>
+            <div><dt>Import</dt><dd>Postman, Insomnia, Bruno, OpenAPI, Swagger, HAR and cURL. The format is detected automatically.</dd></div>
+            <div><dt>Code</dt><dd>Turn any request into cURL, fetch, axios, Python, Go, Java, C#, PHP, Ruby, Rust, HTTPie or PowerShell.</dd></div>
+          </dl>
+          <figure class="figure">
+            <div class="shot">
+              <img class="on-light" src="assets/data-light.png" alt="The Data tab showing three users as a table, with Columns and Export buttons" loading="lazy">
+              <img class="on-dark" src="assets/data-dark.png" alt="The Data tab showing three users as a table, with Columns and Export buttons" loading="lazy">
+            </div>
+            <figcaption>The Data tab, with the same response as above.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="mcp">
+      <div class="container two">
+        <div>
+          <h2>MCP servers and agents, in the same client as your APIs</h2>
+          <p class="lead">Most API clients stop at HTTP. Forge also speaks MCP and A2A, the protocols AI tools use to call your services.</p>
+          <div class="steps-text">
+            <p><b>Test an MCP server</b> over stdio, Streamable HTTP or SSE. List its tools, call them with your own arguments, and see every JSON-RPC message in the console.</p>
+            <p><b>Let your AI assistant use Forge.</b> Turn on the local server in Settings and Claude, Copilot or Cursor can list, run and save the requests in your workspace. Calls that change data wait for your approval.</p>
+            <p><b>Bring your own model, if you want one.</b> Claude, OpenAI, Gemini, Azure, Bedrock, OpenRouter or a local Ollama model can answer questions about a response or run an agentic test. Models see <code>{{token}}</code>, never its value.</p>
+          </div>
+        </div>
+        <div>
+          <div class="terminal" role="img" aria-label="Terminal: adding Forge to Claude Code as an MCP server">
+            <header><span>Connect Forge to Claude Code</span><span>Settings, Connect AI tools</span></header>
+            <pre><span class="p">$</span> claude mcp add --transport http forge \
+    http://127.0.0.1:7878/mcp \
+    --header "Authorization: Bearer &lt;token&gt;"</pre>
+          </div>
+          <div class="terminal" role="img" aria-label="The tools Forge offers over MCP">
+            <header><span>Tools Forge offers</span><span>14 in total</span></header>
+            <pre>list_requests    <span class="c">browse saved requests</span>
+run_request      <span class="c">send one and run its tests</span>
+run_folder       <span class="c">run a folder as a suite</span>
+http_request     <span class="c">send a one-off request</span>
+query_data       <span class="c">filter and group a response</span>
+create_report    <span class="c">write an Excel or PDF report</span>
+save_request     <span class="c">add a request to the workspace</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy">
+      <div class="container two">
+        <div>
+          <h2>Your requests are files in your repository</h2>
+          <p class="lead">Pick any folder, such as one inside your project. Commit the requests, review changes in pull requests, and your team gets them on the next pull.</p>
+          <div class="tree" style="margin-top:28px" role="img" aria-label="An example folder: requests and shared environments are committed, the local secrets file is not">my-api/
+  collections/
+    users/
+      list-users.json      <span class="ok">committed</span>
+      create-user.json     <span class="ok">committed</span>
+  environments/
+    staging.json           <span class="ok">committed</span>
+    staging.local.json     <span class="off">ignored by git</span></div>
+        </div>
+        <ul class="facts">
+          <li><b>No account.</b> There is nothing to sign up for. Forge runs entirely on your computer.</li>
+          <li><b>No telemetry.</b> The only request Forge makes on its own is the update check, which you can turn off.</li>
+          <li><b>Secrets split on import.</b> Tokens and passwords found in imported Postman or Insomnia environments go to the local file.</li>
+          <li><b>Approval before AI sends a secret.</b> A request built by an AI that would send a token to a new host waits for you. This check can't be disabled.</li>
+          <li><b>Signed updates.</b> Each update is signed by Stellitron and verified before it installs.</li>
+          <li><b>Company networks.</b> Forge uses the system proxy and certificate store, so it works on VPNs without setup.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="band" id="download">
+      <div class="container download">
+        <div>
+          <h2>Download</h2>
+          <p class="lead">Installed copies update themselves after you approve each update.</p>
+          <div class="platforms">
+            <a class="platform" data-os="mac" href="https://github.com/stellitron/forge/releases/latest">macOS <span>Apple silicon and Intel</span></a>
+            <a class="platform" data-os="windows" href="https://github.com/stellitron/forge/releases/latest">Windows <span>10 and 11</span></a>
+            <a class="platform" data-os="linux" href="https://github.com/stellitron/forge/releases/latest">Linux <span>AppImage, deb, rpm</span></a>
+          </div>
+          <p class="maker">Forge is built by <a class="link" href="https://stellitron.com">Stellitron</a> in Bengaluru and developed in the open. Report bugs or send pull requests on <a class="link" href="https://github.com/stellitron/forge">GitHub</a>.</p>
+        </div>
+        <div>
+          <div class="terminal" role="img" aria-label="Building Forge from source">
+            <header><span>Or build from source</span><span>Node 20, Rust 1.88</span></header>
+            <pre><span class="p">$</span> git clone https://github.com/stellitron/forge
+<span class="p">$</span> cd forge &amp;&amp; npm install
+<span class="p">$</span> npm run app</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-grid">
+      <div>
+        <a class="brand" href="https://stellitron.com" aria-label="Stellitron">
+          <svg width="30" height="30" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 2 29 9.5v13L16 30 3 22.5v-13L16 2Z" stroke="currentColor" stroke-width="1.5"/><path d="m10 12 6-3.5 6 3.5-12 8 6 3.5 6-3.5M10 12v5m12-2v5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          <span>stellitron<span style="color:var(--primary)">.</span></span>
+        </a>
+        <p>Forge is an open source project<br>by Stellitron Technologies.</p>
+      </div>
+      <div>
+        <h2>Forge</h2>
+        <a href="#download">Download</a>
+        <a href="https://github.com/stellitron/forge/releases">Releases</a>
+        <a href="https://github.com/stellitron/forge/blob/main/docs/README.md">Documentation</a>
+        <a href="https://github.com/stellitron/forge/blob/main/CHANGELOG.md">Changelog</a>
+      </div>
+      <div>
+        <h2>Open source</h2>
+        <a href="https://github.com/stellitron/forge">GitHub</a>
+        <a href="https://github.com/stellitron/forge/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="https://github.com/stellitron/forge/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/stellitron/forge/blob/main/LICENSE">License</a>
+      </div>
+      <div>
+        <h2>Stellitron</h2>
+        <a href="https://stellitron.com">stellitron.com</a>
+        <a href="https://stellitron.com/about">About us</a>
+        <a href="https://stellitron.com/contact">Contact</a>
+        <a href="https://stellitron.com/privacy">Privacy policy</a>
+      </div>
+    </div>
+    <div class="container footer-bottom">
+      <span>© 2026 Stellitron Technologies Pvt Ltd. Apache License 2.0.</span>
+      <span>Forge and the Forge logo are trademarks of Stellitron.</span>
+    </div>
+  </footer>
+
+  <script>
+    // Theme toggle, stored like stellitron.com so a visitor's choice sticks.
+    const themeBtn = document.getElementById("theme");
+    const syncTheme = () => {
+      const dark = document.documentElement.classList.contains("dark");
+      themeBtn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+      document.querySelector('meta[name="theme-color"]').content = dark ? "#101913" : "#f8f9f5";
+    };
+    themeBtn.addEventListener("click", () => {
+      const dark = document.documentElement.classList.toggle("dark");
+      try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch {}
+      syncTheme();
+    });
+    syncTheme();
+
+    // Point the download links at the installers in the latest GitHub release.
+    // Without a release (or offline), they keep linking to the releases page.
+    (async () => {
+      const ua = navigator.userAgent;
+      const os = /Windows/.test(ua) ? "windows" : /Mac/.test(ua) ? "mac" : /Linux|X11/.test(ua) && !/Android/.test(ua) ? "linux" : null;
+      const names = { mac: "macOS", windows: "Windows", linux: "Linux" };
+      if (os) {
+        document.getElementById("dl-label").textContent = `Download for ${names[os]}`;
+        document.querySelector(`.platform[data-os="${os}"]`)?.classList.add("current");
+      }
+      try {
+        const r = await fetch("https://api.github.com/repos/stellitron/forge/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
+        if (!r.ok) return;
+        const rel = await r.json();
+        const assets = rel.assets ?? [];
+        const find = (re) => assets.find((a) => re.test(a.name))?.browser_download_url;
+        const urls = {
+          mac: find(/aarch64\.dmg$/) ?? find(/\.dmg$/),
+          windows: find(/-setup\.exe$/) ?? find(/\.msi$/),
+          linux: find(/\.AppImage$/) ?? find(/\.deb$/),
+        };
+        for (const [key, url] of Object.entries(urls)) {
+          const el = document.querySelector(`.platform[data-os="${key}"]`);
+          if (url && el) el.href = url;
+        }
+        if (os && urls[os]) document.getElementById("dl").href = urls[os];
+        if (rel.tag_name) document.getElementById("dl-note").textContent = `Version ${rel.tag_name.replace(/^v/, "")} for macOS, Windows and Linux`;
+      } catch {
+        // Keep the releases page links.
+      }
+    })();
+  </script>
+</body>
+</html>
