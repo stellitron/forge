@@ -37,7 +37,7 @@ Some checks ask whether a host is one of yours: the script guard, and the guard 
   - it carries a secret to a host where your saved requests don't send that secret.
 
   The prompt shows placeholders, never values. It can't be turned off or skipped with "always allow", and unanswered prompts expire as a denial.
-- **Writes need approval.** Changing requests or calling APIs that modify data asks first, unless you turn that off.
+- **Writes need approval.** Calling APIs that modify data and saving new requests ask first, unless you turn that off for connected apps. Editing requests, settings, variables and imports always asks, and deleting asks even when a client is trusted.
 - **Rendered answers are inert.** Markdown in AI answers never loads images or raw HTML, so a manipulated answer can't leak data through an image URL. Links open only for `http` and `https`.
 
 ## The local server

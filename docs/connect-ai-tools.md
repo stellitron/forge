@@ -42,7 +42,9 @@ Messages are answered by Ask with your configured model.
 
 ## Approvals
 
-- Requests that change data, and saves, show an approval in Forge. You can turn this off, or trust a client for the current session.
+- Requests that change data, and saving new requests, show an approval in Forge. You can turn this off, or trust a client for the current session.
+- Editing requests, changing collection or folder settings, setting variables, saving examples, importing and starting the mock server always ask, even with that turned off. Trust a client for the session to approve a batch of changes at once.
+- Deleting always asks, and trusting a client doesn't skip it.
 - The **secret guard** always applies and can't be skipped by trusting a client. It asks before an AI-built request goes to an unfamiliar host or sends a secret somewhere new. Unanswered prompts expire as a denial after nine minutes.
 - Variable values are filled in inside Forge and never returned to the client.
 

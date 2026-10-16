@@ -133,7 +133,7 @@ export default function ConnectTools({ embedded = false }: { embedded?: boolean 
       </div>
       <label className="check">
         <input type="checkbox" checked={cfg.approveWrites} onChange={(e) => set({ approveWrites: e.target.checked })} />
-        Ask before requests that change data (POST, PUT, PATCH, DELETE) or saving to the workspace
+        Ask before requests that change data (POST, PUT, PATCH, DELETE) or saving new requests. Editing requests, settings, variables and imports always asks.
       </label>
       <div className="row" style={{ flexWrap: "wrap", gap: 4, marginTop: 6 }}>
         {CLIENTS.map((x) => (

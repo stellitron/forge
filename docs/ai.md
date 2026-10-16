@@ -2,7 +2,7 @@
 
 AI in Forge is optional. Every feature that sends requests, runs tests, imports, exports or builds reports works without it. When you connect a model, you also get:
 
-- **Ask** (<kbd>⌘</kbd> <kbd>L</kbd>): questions about your requests and responses, client code, reports and tidying up collections.
+- **Ask** (<kbd>⌘</kbd> <kbd>L</kbd>): answers questions, and does the work when you ask: writes tests and scripts, fixes requests, sets up auth, compares responses, imports specs, saves examples and runs mocks. Big jobs get a plan and sub-agents working in parallel.
 - **Suggest** on the Params and Headers tabs.
 - **Smart request names**, polished once after a new request's first response.
 - **Agentic tests**: an agent that explores an API, MCP server or A2A agent and writes a test report.
@@ -56,12 +56,33 @@ Ask is Forge's assistant for your workspace. Open it with the **Ask** button or 
 
 To ask about other requests, type `@` and pick one, or drag a request from the sidebar onto the Ask panel. Each one shows as a chip above the message; press <kbd>↵</kbd> with no text for an explanation of it. Ask only receives each request's name, method and URL as written (with `{{placeholders}}`), and reads the rest through the same tools as everything else, so secret values stay out.
 
-Ask can read your collections, run saved requests, look at the last response, and work with response data through exact tools rather than by reading raw bodies:
+### Ask it to do the work
 
-- `response_data` summarises the structure of a response.
-- `query_data` filters, sorts, groups and aggregates with exact results.
-- `create_report` writes PDF, Word, PowerPoint, Excel, CSV or Markdown reports.
-- `create_folder` and `organize` tidy up collections, after you approve.
+Ask doesn't just answer questions. Tell it what you want and it does it with the same tools you'd use, asking you before every change:
+
+- "Write assertions for every request in Shop and run them."
+- "Set up bearer auth on the Shop collection with `{{token}}` and make its requests inherit it."
+- "Why did this fail? Fix it if you can."
+- "Compare this response with what staging returned this morning."
+- "Import https://api.example.com/openapi.json, save examples for the Orders folder and start a mock server."
+
+It can read, run, create, edit and delete requests (headers, body, auth, assertions, scripts, docs), change collection and folder settings, set environment variables, save examples, run the mock server, read history and compare responses, import collections and load GraphQL schemas. For data it uses exact tools rather than reading raw bodies: `response_data` describes a response, `query_data` filters, groups and aggregates, and `create_report` writes PDF, Word, PowerPoint, Excel, CSV or Markdown.
+
+### How it works on bigger jobs
+
+- **A plan you can see.** For anything beyond a quick answer, Ask writes a to-do list at the top of its reply and ticks items off as it goes.
+- **Parallel work.** Independent lookups run at the same time. Self-contained pieces of work, like "tests for each folder", go to **sub-agents**: each starts fresh with only its task, works on its own with the same tools, and reports back. Up to three run at once. Expand one in the chat to see its steps and report. Sub-agents work one effort level lighter than the main conversation, and can't start sub-agents of their own.
+- **It checks its work.** After changing something, Ask runs it and tells you plainly what passed, what failed and what it couldn't verify.
+- **Streaming.** Answers appear as they're written with Anthropic and OpenAI-compatible providers (others show each step when it's done). With Claude Opus 5.5, Sonnet 5.5 and Fable 5.1, short progress notes show what it's doing between steps.
+- **Long conversations stay sharp.** Old tool results are cleared once a conversation gets very large, on Anthropic's side for Claude (so nothing it reasoned about is invalidated) and in Forge for other providers.
+- **No silent stops.** After 40 steps Ask pauses with a **Continue** button.
+
+### What it can't do without you
+
+- Every change to your workspace, every data-changing request and every deletion waits for your approval, for sub-agents too. Edits to requests, settings, variables and imports ask even if you turned off approvals for writes. Deleting always asks.
+- It never sees secret values, refuses to write literal secrets into requests or committed folder settings, and keeps secrets you give it in the environment's gitignored file.
+- Requests and folder settings it edits stop counting as trusted until you edit or trust them (see [Workspace trust](security.md#workspace-trust)), so a change it made can't make a new server look like one of yours.
+- It treats responses, imported files and tool output as data, not instructions.
 
 Each step shows in the chat with a plain description, and you can expand it to see the input and result.
 

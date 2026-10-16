@@ -235,7 +235,7 @@ fn spawn_piped(mut cmd: Command) -> std::io::Result<(Child, std::io::PipeWriter,
 /// Launches the browser with DevTools over a private pipe (fds 3 and 4), so no other program on
 /// the machine can connect to it: unlike a debugging port, nothing listens on the network.
 #[cfg(unix)]
-fn launch(app: &AppHandle, radar_id: &str, token: &str, path: &Path, profile: &Path, pending: &Pending) -> Result<(Child, mpsc::UnboundedSender<String>), String> {
+async fn launch(app: &AppHandle, radar_id: &str, token: &str, path: &Path, profile: &Path, pending: &Pending) -> Result<(Child, mpsc::UnboundedSender<String>), String> {
     use std::io::{BufRead, BufReader, Write};
 
     let (child, mut cmd_write, res_read) = spawn_piped(base_command(path, profile)).map_err(|e| format!("Could not start {}: {e}", path.display()))?;
@@ -271,29 +271,42 @@ fn launch(app: &AppHandle, radar_id: &str, token: &str, path: &Path, profile: &P
 /// Windows can't hand the browser extra pipe handles from here, so DevTools listens on a random
 /// loopback port for as long as the radar browser is open.
 #[cfg(not(unix))]
-fn launch(app: &AppHandle, radar_id: &str, token: &str, path: &Path, profile: &Path, pending: &Pending) -> Result<(Child, mpsc::UnboundedSender<String>), String> {
+async fn launch(app: &AppHandle, radar_id: &str, token: &str, path: &Path, profile: &Path, pending: &Pending) -> Result<(Child, mpsc::UnboundedSender<String>), String> {
     let port_file = profile.join("DevToolsActivePort");
     let _ = std::fs::remove_file(&port_file);
     let mut cmd = base_command(path, profile);
     cmd.arg("--remote-debugging-port=0");
-    let child = cmd.spawn().map_err(|e| format!("Could not start {}: {e}", path.display()))?;
+    let mut child = cmd.spawn().map_err(|e| format!("Could not start {}: {e}", path.display()))?;
+    // The browser writes its port and browser-target path once DevTools is listening.
+    let mut ws_url = None;
+    for _ in 0..150 {
+        if let Ok(s) = std::fs::read_to_string(&port_file) {
+            let mut lines = s.lines();
+            if let (Some(port), Some(p)) = (lines.next(), lines.next()) {
+                ws_url = Some(format!("ws://127.0.0.1:{}{}", port.trim(), p.trim()));
+                break;
+            }
+        }
+        if let Ok(Some(_)) = child.try_wait() {
+            // It handed the launch to a browser already running on this profile, or crashed.
+            return Err(format!("{} closed right after starting. If a radar browser window is still open, close it and try again.", browser_name(path)));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let Some(ws_url) = ws_url else {
+        let _ = child.kill().await;
+        return Err(no_devtools(path));
+    };
+    let (stream, _) = match tokio_tungstenite::connect_async(ws_url.as_str()).await {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = child.kill().await;
+            return Err(format!("Couldn't connect to {}'s DevTools on this computer ({e}). Security software may be blocking local connections.", browser_name(path)));
+        }
+    };
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let (app, radar_id, token, pending) = (app.clone(), radar_id.to_string(), token.to_string(), pending.clone());
     tokio::spawn(async move {
-        // The browser writes its port and browser-target path once DevTools is listening.
-        let mut ws_url = None;
-        for _ in 0..150 {
-            if let Ok(s) = std::fs::read_to_string(&port_file) {
-                let mut lines = s.lines();
-                if let (Some(port), Some(p)) = (lines.next(), lines.next()) {
-                    ws_url = Some(format!("ws://127.0.0.1:{}{}", port.trim(), p.trim()));
-                    break;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        let Some(ws_url) = ws_url else { return closed(&app, &radar_id, &token, &pending) };
-        let Ok((stream, _)) = tokio_tungstenite::connect_async(ws_url.as_str()).await else { return closed(&app, &radar_id, &token, &pending) };
         let (mut sink, mut source) = stream.split();
         tokio::spawn(async move {
             while let Some(text) = rx.recv().await {
@@ -311,6 +324,74 @@ fn launch(app: &AppHandle, radar_id: &str, token: &str, path: &Path, profile: &P
         closed(&app, &radar_id, &token, &pending);
     });
     Ok((child, tx))
+}
+
+fn browser_name(path: &Path) -> String {
+    radar_browsers().into_iter().find(|b| Path::new(&b.path) == path).map(|b| b.name).unwrap_or_else(|| "The browser".into())
+}
+
+/// Why DevTools never came up: usually an organization policy that turns it off.
+fn no_devtools(path: &Path) -> String {
+    let name = browser_name(path);
+    match blocking_policy(path) {
+        Some(policy) => format!("{name} is managed by your organization, and its {policy} policy turns off the DevTools connection the radar needs. Pick another browser above, or ask your IT team to allow remote debugging."),
+        None => format!("{name} started but never opened its DevTools connection. If your organization manages this browser, it may have remote debugging turned off; try another browser above."),
+    }
+}
+
+/// Browser policy locations: (program file stem, Windows registry key, macOS preference domain).
+const POLICY_HOMES: &[(&str, &str, &str)] = &[
+    ("chrome", r"SOFTWARE\Policies\Google\Chrome", "com.google.Chrome"),
+    ("google chrome", r"SOFTWARE\Policies\Google\Chrome", "com.google.Chrome"),
+    ("msedge", r"SOFTWARE\Policies\Microsoft\Edge", "com.microsoft.Edge"),
+    ("microsoft edge", r"SOFTWARE\Policies\Microsoft\Edge", "com.microsoft.Edge"),
+    ("brave", r"SOFTWARE\Policies\BraveSoftware\Brave", "com.brave.Browser"),
+    ("brave browser", r"SOFTWARE\Policies\BraveSoftware\Brave", "com.brave.Browser"),
+    ("chromium", r"SOFTWARE\Policies\Chromium", "org.chromium.Chromium"),
+];
+
+/// The name of a policy set on this browser that blocks DevTools, if any.
+fn blocking_policy(path: &Path) -> Option<&'static str> {
+    let stem = path.file_stem()?.to_string_lossy().to_lowercase();
+    let &(_, _key, _domain) = POLICY_HOMES.iter().find(|(s, _, _)| *s == stem)?;
+    let read = |name: &str| -> Option<i64> {
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            for hive in ["HKLM", "HKCU"] {
+                let out = std::process::Command::new("reg").args(["query", &format!(r"{hive}\{_key}"), "/v", name]).creation_flags(0x0800_0000).output().ok()?;
+                if let Some(v) = parse_reg_dword(&String::from_utf8_lossy(&out.stdout), name) {
+                    return Some(v);
+                }
+            }
+            None
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let out = std::process::Command::new("defaults").args(["read", &format!("/Library/Managed Preferences/{_domain}"), name]).output().ok()?;
+            String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = name;
+            None
+        }
+    };
+    if read("RemoteDebuggingAllowed") == Some(0) {
+        Some("RemoteDebuggingAllowed")
+    } else if read("DeveloperToolsAvailability") == Some(2) {
+        Some("DeveloperToolsAvailability")
+    } else {
+        None
+    }
+}
+
+/// Reads `name    REG_DWORD    0x0` from `reg query` output.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_reg_dword(out: &str, name: &str) -> Option<i64> {
+    let line = out.lines().find(|l| l.split_whitespace().next() == Some(name))?;
+    let v = line.split_whitespace().nth(2)?;
+    i64::from_str_radix(v.trim_start_matches("0x"), 16).ok()
 }
 
 #[derive(Serialize)]
@@ -347,6 +428,27 @@ async fn close_stale(profile: &Path) {
     }
 }
 
+/// Windows version: Chrome keeps a `lockfile` in the profile while it runs. Find the process whose
+/// command line names this exact profile and end it.
+#[cfg(target_os = "windows")]
+async fn close_stale(path: &Path, profile: &Path) {
+    let lock = profile.join("lockfile");
+    if !lock.exists() || std::fs::remove_file(&lock).is_ok() {
+        // No lock, or nobody holds it: no browser is running on this profile.
+        return;
+    }
+    let Some(exe) = path.file_name().map(|n| n.to_string_lossy().replace('\'', "''")) else { return };
+    let needle = format!("--user-data-dir={}", profile.display()).replace('\'', "''");
+    let script = format!("Get-CimInstance Win32_Process -Filter \"Name='{exe}'\" | Where-Object {{ $_.CommandLine -and $_.CommandLine.Contains('{needle}') }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}");
+    let _ = tokio::process::Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script]).creation_flags(0x0800_0000).output().await;
+    for _ in 0..30 {
+        if std::fs::remove_file(&lock).is_ok() || !lock.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// Opens a blank tab in a separate browser instance and connects to its DevTools.
 #[tauri::command]
 pub async fn radar_start(
@@ -363,16 +465,18 @@ pub async fn radar_start(
     let profile = profile_dir(&app, &path)?;
     #[cfg(unix)]
     close_stale(&profile).await;
+    #[cfg(target_os = "windows")]
+    close_stale(&path, &profile).await;
     let token = uuid::Uuid::new_v4().to_string();
     let pending: Pending = Arc::default();
-    let (child, tx) = launch(&app, &id, &token, &path, &profile, &pending)?;
+    let (child, tx) = launch(&app, &id, &token, &path, &profile, &pending).await?;
     let session = Session { tx, pending, next: AtomicU64::new(1), child, token };
     manager.0.lock().unwrap().insert(id.clone(), Arc::new(tokio::sync::Mutex::new(session)));
     // A browser already running with this profile takes the launch over and exits, so check we
     // really reached a DevTools endpoint before reporting success.
     if send(&manager, &id, "Browser.getVersion", None, None, Duration::from_secs(20)).await.is_err() {
         stop(&manager, &id).await;
-        return Err("The browser didn't start its DevTools connection. If a radar browser window is still open, quit it and try again.".into());
+        return Err(if cfg!(unix) { no_devtools(&path) } else { format!("{} opened DevTools but didn't answer. Close any radar browser window and try again.", browser_name(&path)) });
     }
     Ok(Started { browser: path.to_string_lossy().into(), private: cfg!(unix) })
 }
@@ -462,6 +566,14 @@ pub fn radar_clear_profiles(app: AppHandle, manager: tauri::State<'_, RadarManag
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_policy_values_from_reg_output() {
+        let out = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Google\\Chrome\r\n    RemoteDebuggingAllowed    REG_DWORD    0x0\r\n\r\n";
+        assert_eq!(parse_reg_dword(out, "RemoteDebuggingAllowed"), Some(0));
+        assert_eq!(parse_reg_dword("    DeveloperToolsAvailability    REG_DWORD    0x2", "DeveloperToolsAvailability"), Some(2));
+        assert_eq!(parse_reg_dword("ERROR: The system was unable to find the specified registry key or value.", "RemoteDebuggingAllowed"), None);
+    }
 
     #[test]
     fn forwards_api_traffic_only() {

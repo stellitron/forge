@@ -65,8 +65,12 @@ function kvSafe(v: unknown, what: string): any[] {
 
 const folderPath = (p: string) => `${COLLECTIONS}/${String(p).replace(/^collections\//, "").replace(/^\/+|\/+$/g, "")}`;
 
+/**
+ * Changes to requests, settings, variables, examples, imports and the mock server always ask, for
+ * Ask and for connected apps alike. The "approve writes" switch only covers sending data-changing
+ * requests and saving new ones; the user can still trust a client for the session to approve a batch.
+ */
 async function approve(ctx: ToolCtx, summary: string) {
-  if (st().settings.server?.approveWrites === false) return;
   if (!(await ctx.approve(summary))) throw new Error("The user declined this in Forge. Don't retry it; ask them what they want instead.");
 }
 

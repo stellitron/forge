@@ -15,7 +15,8 @@ export interface LoopTool {
   spec: ToolSpec;
   /** Safe to run alongside other calls from the same turn. */
   parallel?: boolean;
-  run(input: any): Promise<string>;
+  /** `callId` identifies this call, e.g. to tie a sub-agent's progress to it. */
+  run(input: any, callId: string): Promise<string>;
 }
 
 export type LoopEvent =
@@ -79,7 +80,7 @@ export async function runLoop(opts: {
     if (!tool) return done(`There's no tool named "${c.name}". Use one of: ${[...byName.keys()].join(", ")}.`, true);
     if (c.input && typeof c.input === "object" && "_unparsed" in c.input) return done("The arguments weren't valid JSON. Call the tool again with a JSON object that matches its schema.", true);
     try {
-      return done(clip(await tool.run(c.input ?? {})), false);
+      return done(clip(await tool.run(c.input ?? {}, c.id)), false);
     } catch (e) {
       return done(e instanceof Error ? e.message : String(e), true);
     }

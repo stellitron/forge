@@ -190,7 +190,6 @@ export class Assistant {
   }
 
   private tools(emit: (e: AssistantEvent) => void): LoopTool[] {
-    let delegateSeq = 0;
     return [
       ...this.workspaceTools(this.ctx()),
       {
@@ -207,7 +206,7 @@ export class Assistant {
       {
         spec: DELEGATE_SPEC,
         parallel: true,
-        run: ({ title, task }, id?: string) => this.delegate(String(title || "Sub-task"), String(task ?? ""), id ?? `d${++delegateSeq}`, emit),
+        run: ({ title, task }, callId) => this.delegate(String(title || "Sub-task"), String(task ?? ""), callId, emit),
       },
     ];
   }
@@ -216,16 +215,11 @@ export class Assistant {
     this.stopped = false;
     const settings = useStore.getState().settings;
     const msg = context(withFocus, refs) + text;
-    // Sub-agent events carry the delegate call's id, so the chat can nest them under it.
-    let currentCall = "";
-    const tracked = (e: AssistantEvent) => {
-      if (e.type === "call" && !e.parent) currentCall = e.id;
-      emit(e);
-    };
-    const tools = this.tools(tracked).map((t) => (t.spec.name === "delegate" ? { ...t, run: (input: any) => (t.run as (i: any, id?: string) => Promise<string>)(input, currentCall) } : t));
+    // Sub-agent events carry their delegate call's id (`parent`), so the chat nests them under it.
+    const tools = this.tools(emit);
     if (!this.session) this.session = createSession(settings, ORCHESTRATOR, tools.map((t) => t.spec), `${snapshot()}\n\n${msg}`);
     else this.session.addUser(msg);
-    const r = await runLoop({ session: this.session, tools, maxSteps: MAX_STEPS, isStopped: () => this.stopped, emit: tracked, concurrency: 6 });
+    const r = await runLoop({ session: this.session, tools, maxSteps: MAX_STEPS, isStopped: () => this.stopped, emit, concurrency: 6 });
     if (r.stop === "budget") emit({ type: "budget" });
     return r.stop === "stopped" ? r.text || "(stopped)" : r.text;
   }

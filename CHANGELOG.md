@@ -4,6 +4,17 @@ All notable changes to Forge are listed here. The format follows [Keep a Changel
 
 ## Unreleased
 
+### Changed
+
+- Ask is rebuilt as an agent that does the work you ask for: it plans with a visible to-do list, runs independent lookups in parallel, hands self-contained work to up to three sub-agents at once, checks its changes by running them, and pauses with Continue instead of stopping. Answers stream as they're written. New tools let it edit requests (headers, body, auth, assertions, scripts), change folder settings, set variables, save examples, run the mock server, read history, compare responses, import collections and load GraphQL schemas, each after your approval.
+- Requests and folder settings Ask edits stop counting as trusted until you edit or trust them, and the AI request guard now checks every request that isn't trusted.
+- Editing requests, settings, variables and imports always asks, for Ask and for connected AI apps, even with "approve writes" turned off. That switch now covers only data-changing requests and saving new ones.
+- Long Ask conversations clear old tool results (on Anthropic's side for Claude) so they stay within the model's context.
+
+### Fixed
+
+- Website radar on Windows: a radar browser left open from an earlier run is closed before a new launch, and when the browser can't connect the message says why. That covers a browser that closed straight away, a company policy that turns off remote debugging (`RemoteDebuggingAllowed` or `DeveloperToolsAvailability`), and a blocked local connection, instead of the same generic error every time. macOS reports the policy too.
+
 ## 0.2.0 (2026-10-16)
 
 ### Added
