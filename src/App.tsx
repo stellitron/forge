@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Bot, FolderOpen, Globe, Server, SlidersHorizontal, Settings as Gear, Waypoints, X, Zap, MessageSquare } from "lucide-react";
+import { Bot, FolderCog, FolderOpen, Globe, History, Server, SlidersHorizontal, Settings as Gear, Waypoints, X, Zap, MessageSquare } from "lucide-react";
 import Sidebar, { ItemBadge } from "./components/Sidebar";
 import { hasFiles, readDropped, setPendingDrop } from "./lib/dropFiles";
 import ImportModal from "./components/ImportModal";
@@ -8,19 +8,29 @@ import ConsolePanel from "./components/ConsolePanel";
 import ForgeMark from "./components/ForgeMark";
 import ChatPanel, { toggleChat, useChatOpen } from "./components/ChatPanel";
 import ApprovalModal from "./components/ApprovalModal";
+import TrustPrompt from "./components/TrustPrompt";
+import QuickOpen, { openQuickOpen } from "./components/QuickOpen";
+import CookiesModal from "./components/CookiesModal";
+import { startCookieJars } from "./lib/cookies";
+import { useHistory } from "./lib/history";
 import Onboarding from "./components/Onboarding";
 import { startUpdateChecks, useUpdates } from "./lib/updates";
 import { openSettings } from "./lib/settingsNav";
 import { useConsole } from "./lib/devconsole";
-import { safeGet, safeSet } from "./components/ui";
+import { Menu, safeGet, safeSet, type MenuItem } from "./components/ui";
 import { COLLECTIONS, ENV_TAB, SETTINGS_TAB, basename, useStore } from "./lib/store";
 import HttpPanel from "./panels/HttpPanel";
 import McpPanel from "./panels/McpPanel";
 import A2APanel from "./panels/A2APanel";
 import WsPanel from "./panels/WsPanel";
 import WebPanel from "./panels/WebPanel";
+import RadarPanel from "./panels/RadarPanel";
 import AgentPanel from "./panels/AgentPanel";
 import RunnerPanel from "./panels/RunnerPanel";
+import HistoryPanel from "./panels/HistoryPanel";
+import MockPanel from "./panels/MockPanel";
+import FolderPanel from "./panels/FolderPanel";
+import { useMocks } from "./lib/mock";
 import { EnvPanel, SettingsPanel } from "./panels/SettingsPanels";
 
 /** Window title bar: traffic lights on the left, brand centred, Settings in the right corner. */
@@ -103,6 +113,24 @@ function Welcome() {
   );
 }
 
+function HistoryTabLabel({ id }: { id: string }) {
+  const e = useHistory((s) => s.entries.find((x) => x.id === id));
+  return (
+    <>
+      <History size={13} /> <span className="label">{e ? `${e.name} · ${new Date(e.ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}` : "History"}</span>
+    </>
+  );
+}
+
+function MockTabLabel({ folder }: { folder: string }) {
+  const on = useMocks((s) => !!s.running[folder]);
+  return (
+    <>
+      <Server size={13} className={on ? "ok" : undefined} /> <span className="label">Mock · {basename(folder) === COLLECTIONS ? "All" : basename(folder)}</span>
+    </>
+  );
+}
+
 function TabLabel({ id }: { id: string }) {
   const saving = useStore((s) => s.saving[id]);
   const item = useStore((s) => s.items[id]);
@@ -120,6 +148,14 @@ function TabLabel({ id }: { id: string }) {
     );
   if (id.startsWith("::runner:"))
     return <span className="label">Run · {basename(id.slice(9)) === COLLECTIONS ? "All" : basename(id.slice(9))}</span>;
+  if (id.startsWith("::history:")) return <HistoryTabLabel id={id.slice(10)} />;
+  if (id.startsWith("::mock:")) return <MockTabLabel folder={id.slice(7)} />;
+  if (id.startsWith("::folder:"))
+    return (
+      <>
+        <FolderCog size={13} /> <span className="label">{basename(id.slice(9))} settings</span>
+      </>
+    );
   if (!item) return <span className="label muted">(deleted)</span>;
   return (
     <>
@@ -137,7 +173,7 @@ function Body({ id }: { id: string | null }) {
       <div className="empty">
         <div className="big">Nothing open</div>
         <div>
-          Pick something from the sidebar, or right-click a collection to add a request, MCP server, A2A agent, WebSocket, web check or agent test.
+          Pick something from the sidebar, or right-click a collection to add a request, MCP server, A2A agent, WebSocket, web check, website radar or agent test.
         </div>
         <div className="row" style={{ marginTop: 8 }}>
           <kbd>⌘</kbd>
@@ -149,6 +185,9 @@ function Body({ id }: { id: string | null }) {
   if (id === SETTINGS_TAB) return <SettingsPanel />;
   if (id === ENV_TAB) return <EnvPanel />;
   if (id.startsWith("::runner:")) return <RunnerPanel folder={id.slice(9)} />;
+  if (id.startsWith("::history:")) return <HistoryPanel key={id} id={id.slice(10)} />;
+  if (id.startsWith("::mock:")) return <MockPanel key={id} folder={id.slice(7)} />;
+  if (id.startsWith("::folder:")) return <FolderPanel key={id} path={id.slice(9)} />;
   if (!item) return <div className="empty">This item no longer exists.</div>;
   switch (item.kind) {
     case "http":
@@ -161,6 +200,8 @@ function Body({ id }: { id: string | null }) {
       return <WsPanel key={id} item={item} />;
     case "web":
       return <WebPanel key={id} item={item} />;
+    case "radar":
+      return <RadarPanel key={id} item={item} />;
     case "agent":
       return <AgentPanel key={id} item={item} />;
   }
@@ -172,8 +213,10 @@ export default function App() {
   const st = useStore.getState();
   const [ready, setReady] = useState(false);
 
+  useEffect(() => useStore.subscribe((s, prev) => void (s.root && s.root !== prev.root && useHistory.getState().load(s.root))), []);
+
   useEffect(() => {
-    st.init().finally(() => setReady(true));
+    st.init().finally(() => (setReady(true), startCookieJars()));
     startUpdateChecks();
     const keys = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -181,6 +224,10 @@ export default function App() {
       if (mod && e.key === "w" && s.active) {
         e.preventDefault();
         s.closeTab(s.active);
+      }
+      if (mod && (e.key.toLowerCase() === "k" || e.key.toLowerCase() === "p") && !e.shiftKey && s.root) {
+        e.preventDefault();
+        openQuickOpen();
       }
       if (mod && e.key === ",") {
         e.preventDefault();
@@ -239,6 +286,18 @@ function Workspace() {
   const chatOpen = useChatOpen();
   const st = useStore.getState();
   const [side, setSide] = useState(() => Number(safeGet("side")) || 272);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: (MenuItem | "-")[] } | null>(null);
+  const tabMenu = (t: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const i = tabs.indexOf(t);
+    const others = tabs.filter((x) => x !== t);
+    const right = tabs.slice(i + 1);
+    const items: (MenuItem | "-")[] = [{ label: "Close", onClick: () => st.closeTab(t) }];
+    if (others.length) items.push({ label: "Close others", onClick: () => (st.closeTabs(others), st.openTab(t)) });
+    if (right.length) items.push({ label: "Close to the right", onClick: () => st.closeTabs(right) });
+    items.push("-", { label: "Close all", onClick: () => st.closeTabs(tabs) });
+    setMenu({ x: e.clientX, y: e.clientY, items });
+  };
   const dragging = useRef(false);
   useEffect(() => {
     const move = (e: MouseEvent) => dragging.current && setSide(Math.min(480, Math.max(200, e.clientX)));
@@ -262,9 +321,10 @@ function Workspace() {
         <div className="side-resize" onMouseDown={() => (dragging.current = true)} />
       </aside>
       <main className="main">
+        {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
         <div className="tabbar" data-tauri-drag-region>
           {tabs.map((t) => (
-            <div key={t} className={`tab ${t === active ? "active" : ""}`} onClick={() => st.openTab(t)} onAuxClick={(e) => e.button === 1 && st.closeTab(t)}>
+            <div key={t} className={`tab ${t === active ? "active" : ""}`} onClick={() => st.openTab(t)} onAuxClick={(e) => e.button === 1 && st.closeTab(t)} onContextMenu={(e) => tabMenu(t, e)}>
               <TabLabel id={t} />
               <span className="x" onClick={(e) => (e.stopPropagation(), st.closeTab(t))}>
                 <X size={12} />
@@ -312,6 +372,9 @@ function Workspace() {
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
       {importing && <ImportModal onClose={() => st.setImporting(false)} />}
       <ApprovalModal />
+      <TrustPrompt />
+      <QuickOpen />
+      <CookiesModal />
     </div>
     </div>
   );

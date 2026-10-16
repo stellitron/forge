@@ -59,6 +59,12 @@ For OAuth 2.0, the client credentials and password grants fetch a token automati
 
 Exit codes: `0` when every request passes its checks, `1` when any fails or errors, `2` for usage errors such as an unknown environment.
 
+## Scripts
+
+Pre-request and post-response scripts run in the CLI as they do in the app. If a script tries to send a request to a host none of your saved requests use, attach a secret to a host that doesn't normally receive it, or point a variable at a new host, the CLI has no one to ask. It blocks the request, or doesn't save the variable, and reports why. Pass `--trust-scripts` for collections you trust that do this on purpose.
+
+The CLI trusts the repo it runs, as any test runner does: every saved request counts as yours. Don't give it secrets when running code you don't trust, such as pull requests from forks.
+
 ## Data-driven runs
 
 With `--data`, each row is one run of the selected requests, and each column becomes a variable. Tests can use the same variables, for example a JSONPath check that `$.sku` equals `{{sku}}`.

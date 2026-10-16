@@ -15,6 +15,8 @@ function setup(items: Item[]) {
     envs: [{ name: "Dev", path: "environments/dev.json", vars: [{ key: "baseUrl", value: "https://api.shop.com", enabled: true }], secrets: [{ key: "token", value: TOKEN, enabled: true }] }],
     activeEnv: "environments/dev.json",
     sessionVars: {},
+    // These are your own requests in a workspace you trust.
+    trustEverything: true,
   } as any);
 }
 
@@ -103,3 +105,4 @@ describe("approval expiry", () => {
     vi.useRealTimers();
   });
 });
+

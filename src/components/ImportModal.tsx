@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BookOpen, CheckCircle2, FileUp, FolderOpen, Info, Loader2, Upload } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2, FileUp, FolderOpen, Info, Loader2, ShieldCheck, Upload } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { fs } from "../lib/ipc";
 import { importAny, type ImportResult, type Source } from "../lib/importAny";
 import { hasFiles, readDropped, takePendingDrop } from "../lib/dropFiles";
-import { COLLECTIONS, useStore } from "../lib/store";
+import { slug, useStore } from "../lib/store";
 import { Modal } from "./ui";
 import DocsModal from "./DocsModal";
 import { summarizeImport, type ImportSummary } from "../lib/importSummary";
+import { safeName as safe, saveCollections } from "../lib/saveImport";
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-const safe = (s: string) => s.replace(/[/\\:*?"<>|]/g, "-").trim() || "Imported";
 
 export default function ImportModal({ onClose }: { onClose: () => void }) {
   const [sources, setSources] = useState<Source[]>(() => takePendingDrop() ?? []);
@@ -18,7 +18,7 @@ export default function ImportModal({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   /** After importing: the folders created, shown with the summary and next steps. */
-  const [done, setDone] = useState<{ bases: { name: string; path: string }[]; summary: ImportSummary } | null>(null);
+  const [done, setDone] = useState<{ bases: { name: string; path: string }[]; envPaths: string[]; summary: ImportSummary; trusted?: boolean } | null>(null);
   const [docsFor, setDocsFor] = useState<string | null>(null);
   const st = useStore.getState();
 
@@ -93,35 +93,17 @@ export default function ImportModal({ onClose }: { onClose: () => void }) {
     if (!r) return;
     setBusy(true);
     try {
-      let n = 0;
-      const bases: { name: string; path: string }[] = [];
-      const taken = new Set(st.dirs);
-      for (const c of r.collections) {
-        let base = `${COLLECTIONS}/${safe(c.name)}`;
-        for (let i = 2; taken.has(base); i++) base = `${COLLECTIONS}/${safe(c.name)} ${i}`;
-        taken.add(base);
-        bases.push({ name: base.slice(COLLECTIONS.length + 1), path: base });
-        await st.createFolder(base);
-        const made = new Set<string>();
-        for (const it of c.items) {
-          const folder = it.folder ? `${base}/${it.folder.split("/").map(safe).join("/")}` : base;
-          if (it.folder && !made.has(folder)) {
-            // Create each level so nested folders exist.
-            const parts = folder.slice(base.length + 1).split("/");
-            for (let i = 1; i <= parts.length; i++) {
-              const p = `${base}/${parts.slice(0, i).join("/")}`;
-              if (!made.has(p)) await st.createFolder(p), made.add(p);
-            }
-          }
-          await st.createItem(folder, "http", it.name, it.data);
-          n++;
-        }
-      }
+      // Files from elsewhere don't vouch for their own hosts until you've looked at them.
+      const { n, bases } = await saveCollections(r, { untrusted: true });
       // Credentials go to the gitignored <env>.local.json; plain values stay shareable.
-      for (const e of r.envs) await st.createEnv(safe(e.name), e.vars, e.secrets).catch(() => {});
+      const envPaths: string[] = [];
+      for (const e of r.envs) {
+        await st.createEnv(safe(e.name), e.vars, e.secrets, { trusted: false }).catch(() => {});
+        envPaths.push(`environments/${slug(safe(e.name))}.json`);
+      }
       if (r.baseUrl) st.setVars({ baseUrl: r.baseUrl });
       st.notify(`Imported ${n} requests${r.envs.length ? ` and ${r.envs.length} environments` : ""}`);
-      setDone({ bases, summary: summarizeImport(r, all, useStore.getState().envs.flatMap((e) => [...e.vars, ...e.secrets].map((v) => v.key))) });
+      setDone({ bases, envPaths, summary: summarizeImport(r, all, useStore.getState().envs.flatMap((e) => [...e.vars, ...e.secrets].map((v) => v.key))) });
     } catch (e) {
       st.notify(String(e instanceof Error ? e.message : e), "error");
     } finally {
@@ -154,6 +136,21 @@ export default function ImportModal({ onClose }: { onClose: () => void }) {
                 <BookOpen size={13} /> Write docs{done.bases.length > 1 ? ` for ${b.name}` : ""}
               </button>
             ))}
+          </div>
+          <div className="import-next">
+            <div className="grow">
+              <b>{done.trusted ? "Trusted" : "Not trusted yet"}</b>
+              <div className="muted">
+                {done.trusted
+                  ? "These requests count as yours: their hosts are known when a script or AI sends something there."
+                  : `Until you trust ${done.bases.length === 1 ? "this collection" : "these collections"}, ${done.summary.scripts ? `its ${done.summary.scripts} script${done.summary.scripts === 1 ? "" : "s"} and ` : ""}AI requests need your OK before sending anything to hosts only these requests use. Editing a request trusts it too.`}
+              </div>
+            </div>
+            {!done.trusted && (
+              <button className="btn sm" onClick={() => (st.trust(done.bases.map((b) => b.path), done.envPaths), setDone({ ...done, trusted: true }))}>
+                <ShieldCheck size={13} /> Trust
+              </button>
+            )}
           </div>
           <div className="row" style={{ justifyContent: "flex-end" }}>
             <button className="btn" onClick={onClose}>
@@ -244,6 +241,7 @@ function SummaryView({ s, compact }: { s: ImportSummary; compact?: boolean }) {
           <div><b>{s.folders}</b><span>folders</span></div>
           <div><b>{s.envs.length}</b><span>environments</span></div>
           <div><b>{s.withTests}</b><span>with tests</span></div>
+          {!!s.scripts && <div><b>{s.scripts}</b><span>with scripts</span></div>}
           <div><b>{s.withDescriptions}</b><span>described</span></div>
         </div>
       )}

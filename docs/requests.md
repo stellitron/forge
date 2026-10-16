@@ -98,6 +98,104 @@ The **Tests** tab holds assertions on status, headers, JSONPath, body text, resp
 
 Captures copy a value from a response into a variable, for example a login token from `$.access_token`. Captured values are stored as secrets of the active environment.
 
+## Scripts
+
+For anything assertions and captures can't do, the **Scripts** tab runs JavaScript before the request is sent (**Pre-request**) and after the response arrives (**Post-response**). The snippet buttons add common steps.
+
+```js
+// Post-response
+pm.test("Status is 200", () => pm.response.to.have.status(200));
+const data = pm.response.json();
+pm.expect(data.items.length).to.be.above(0);
+pm.environment.set("orderId", data.items[0].id);
+```
+
+Scripts from Postman, Bruno and Insomnia run as they are, and they come along when you import:
+
+| API | What it gives you |
+| --- | --- |
+| `pm` (Postman), `insomnia` | `pm.test`, `pm.expect`, `pm.response` (`code`, `json()`, `text()`, `headers`, `responseTime`, `to.have.status`…), `pm.request` (change the URL, method, headers or body before sending), `pm.environment` / `pm.variables` / `pm.collectionVariables` / `pm.globals`, `pm.info` |
+| Bruno | `bru.getEnvVar` / `setEnvVar` / `getVar` / `setVar`, `req` (`getUrl`, `setHeader`, `setBody`…), `res` (`status`, `body`, `getHeader`…), `test`, `expect` |
+| Both | Chai-style `expect`: `equal`, `eql`, `deep`, `not`, `include`, `property`, `lengthOf`, `above`, `below`, `a`/`an`, `match`, `oneOf`, `keys`, `members`, `ok`, `exist`, `empty`… |
+
+- Tests from scripts show next to assertions in the response's **Tests** tab, in the folder runner and in the CLI.
+- `console.log` goes to the Console, and to the terminal in the CLI.
+- If a pre-request script throws an error, the request isn't sent.
+- Forge has one variable scope, the active environment, so every `pm.*` variable store reads and writes it. Like captured values, variables a script sets are saved in the environment's gitignored local file.
+- Collection- and folder-level scripts from Postman and Bruno are combined into each request's script, in the order those tools run them.
+
+Scripts run sandboxed, in a background worker in the app and an isolated context in the CLI. They have no network, file or module access. A script that runs longer than 5 seconds is stopped.
+
+A script can still change where its request goes, or set a variable like `{{baseUrl}}` that later requests use. So Forge asks before:
+
+- sending a request that a pre-request script moved to a host none of your saved requests use,
+- sending a secret that a pre-request script attached to a host where your saved requests don't send it (for example, your API's `{{token}}` on a request to another site),
+- saving a variable that would point your requests at a new host.
+
+"Your saved requests" means requests you trust. See [Workspace trust](security.md#workspace-trust).
+
+Everyday scripts, like setting an `Authorization` header from a token you captured or signing a request, don't trigger these prompts. An approval lasts until Forge restarts. The CLI can't ask, so it blocks these changes unless you pass `--trust-scripts`.
+
+### Sending requests from scripts
+
+`pm.sendRequest` works in both of its forms, with a callback or with `await`, for example to fetch a fresh token before each request. Bruno's `await bru.sendRequest({ url, method, headers, data })` works too.
+
+```js
+pm.sendRequest({
+  url: pm.environment.get("baseUrl") + "/oauth/token",
+  method: "POST",
+  body: { mode: "urlencoded", urlencoded: [{ key: "grant_type", value: "client_credentials" }] },
+}, (err, res) => pm.environment.set("token", res.json().access_token));
+```
+
+The script doesn't send anything itself. Forge sends the request for it, with the same checks as above. A host none of your trusted requests use, or a secret going somewhere it isn't normally sent, needs your OK first. Time spent waiting for the response doesn't count toward the 5-second script limit.
+
+`require()` and Postman's built-in libraries (lodash, CryptoJS, moment) aren't available.
+
+In the CLI, scripts run in a separate worker thread with an empty environment and no network access. A runaway script is stopped without hanging the job, and CI secrets in environment variables can't be reached from scripts.
+
+## Folder and collection settings
+
+Right-click a folder and choose **Folder settings** (or **Collection settings** for a top-level folder) to set what everything inside it shares:
+
+- **Auth.** Requests set to **Inherit from folder** (the default for new requests) use the nearest folder's auth. Sign in once on the collection instead of in every request. The request's Auth tab shows where its auth comes from.
+- **Headers.** Added to every request inside. A request's own header with the same name wins. Inherited headers show in the request's Headers tab.
+- **Variables.** Like Postman's collection variables, these are shared with the collection and committed. The active environment overrides them, so keep secrets in environments.
+- **Scripts.** Run before each request's own scripts, outermost folder first. Each level runs separately, so they can use the same variable names.
+
+Settings live in each folder's `_folder.json` (see [Workspace format](workspace-format.md)). Imports from Postman and Bruno bring collection and folder auth and scripts across as folder settings.
+
+## Examples
+
+Save a response with the bookmark button in the response bar. Examples are kept in the request file, with known secret values stored as `{{placeholders}}` and cookies dropped. Manage them at the bottom of the request's **Docs** tab, where you can rename them, edit status, type and body, or make one the default.
+
+Examples appear in generated docs and in OpenAPI and Postman exports, and the AI sees them when it reads a request. Postman saved responses and OpenAPI response examples come in on import. Each request's default example is what the [mock server](#mock-server) returns.
+
+## Mock server
+
+Right-click a folder and choose **Mock server**, then **Start**. Forge serves the saved examples of every request in the folder on `127.0.0.1`, for example `http://127.0.0.1:4010`. A frontend can then be built before the backend exists. Routes follow the request URLs: `{{baseUrl}}/users/:id` answers `GET /users/42`. Routes update as you edit requests and examples.
+
+- **Point `{{baseUrl}}` here** creates a "Mock" environment and switches to it.
+- Choose a response per call with `Prefer: example=Name` or `Prefer: code=404`, or add `?__example=Name` to the URL. Otherwise each request returns its first example.
+- A request without examples answers `501` with a hint. An unknown route answers `404` listing the routes there are.
+- Only this computer can connect, and browsers only get answers for pages served from `localhost`, `127.0.0.1` or `[::1]`, plus origins you allow in the panel. Any website open in your browser runs on your computer too, and examples can contain real data, so other origins are refused. Stop the mock when you're done.
+
+## History
+
+Every request you send is kept in the sidebar's **History** view (the clock button), newest first. Open an entry to see the exact request and response, **Send again** with today's variable values, or **Save as request**. History is kept per workspace on this computer only, never in the workspace. Secret values are stored as their `{{placeholders}}`, and credentials typed directly into headers are hidden. It keeps the last 300 sends. Turn it off or clear it in **Settings**.
+
+## Compare responses
+
+The **Compare** tab of a response shows what changed since an earlier response to the same request. Pick any earlier send, for example one made with the staging environment, to compare staging with production. JSON responses list each change by path (`$.items[0].price: 10 → 12`); other responses show a line diff. Headers that change on every response, like `Date` or request IDs, are left out unless you include them.
+
+## Cookies
+
+Cookies servers set are sent back automatically, like in a browser, and all requests share them. Each environment has its own cookie jar, so a staging login doesn't follow you to production. Open **Cookies** from Settings, from <kbd>⌘</kbd> <kbd>K</kbd>, or from the cookie button on a response that set one, to see, edit, add or delete them. Jars are kept on this computer between sessions, never in the workspace. Turn that off in **Settings** to keep them only until Forge closes.
+
+## GraphQL
+
+In a GraphQL request, **Load schema** sends an introspection query to the endpoint, with the request's auth and headers. With the schema loaded, the query editor suggests fields and arguments as you type (or press <kbd>Ctrl</kbd> <kbd>Space</kbd>) and underlines mistakes. Every request to the same endpoint shares the schema until Forge closes. If the server has introspection turned off, Forge says so.
+
 ## Data and reports
 
 <img src="images/data-dark.png" alt="The Data tab showing a response as a table" width="900">

@@ -38,9 +38,12 @@ export async function invoke<T>(cmd: string, args: Record<string, any> = {}): Pr
       return readTree(args.path) as T;
     case "settings_read":
       return "{}" as T;
+    case "appdata_read":
+      return "" as T;
     case "http_cancel":
     case "http_reset_cookies":
     case "settings_write":
+    case "appdata_write":
     case "workspace_write":
     case "workspace_mkdir":
     case "workspace_ensure_gitignore":

@@ -97,10 +97,18 @@ pub struct HttpResponse {
 
 /// Clients are cached per (follow_redirects, insecure, client certificate) so connections and
 /// cookies are reused.
+/// Clients by (follow redirects, accept invalid certs, client certificate).
+type ClientMap = HashMap<(bool, bool, Option<ClientCert>), reqwest::Client>;
+
 #[derive(Default)]
-pub struct Clients(Mutex<HashMap<(bool, bool, Option<ClientCert>), reqwest::Client>>);
+pub struct Clients(Mutex<ClientMap>, std::sync::Arc<crate::cookies::Jar>);
 
 impl Clients {
+    /// The cookie jar every client shares.
+    pub fn jar(&self) -> std::sync::Arc<crate::cookies::Jar> {
+        self.1.clone()
+    }
+
     pub fn get(&self, follow: bool, insecure: bool) -> Result<reqwest::Client, String> {
         self.get_with(follow, insecure, None)
     }
@@ -118,7 +126,7 @@ impl Clients {
         };
         let mut builder = reqwest::Client::builder()
             .redirect(policy)
-            .cookie_store(true)
+            .cookie_provider(self.1.clone())
             .tls_danger_accept_invalid_certs(insecure)
             .user_agent(concat!("Forge/", env!("CARGO_PKG_VERSION")));
         if let Some(c) = cert {
@@ -140,9 +148,6 @@ impl Clients {
         Ok(client)
     }
 
-    pub fn reset(&self) {
-        self.0.lock().unwrap().clear();
-    }
 }
 
 /// In-flight requests, so the UI can cancel them.
@@ -337,8 +342,8 @@ pub fn http_cancel(id: String, inflight: tauri::State<'_, InFlight>) -> bool {
     inflight.cancel(&id)
 }
 
-/// Drops cached clients, which also clears their cookie jars.
+/// Empties the shared cookie jar.
 #[tauri::command]
 pub fn http_reset_cookies(clients: tauri::State<'_, Clients>) {
-    clients.reset();
+    clients.jar().0.write().unwrap().clear();
 }

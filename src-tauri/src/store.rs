@@ -191,6 +191,35 @@ pub fn settings_write(app: AppHandle, content: String) -> Result<(), String> {
     Ok(())
 }
 
+/// A file in Forge's private app-data folder (history, cookies): never in a workspace, readable
+/// only by this user. Names are plain (letters, digits, `-`, `_`, `.`) so they can't escape it.
+fn appdata_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    if name.is_empty() || name.starts_with('.') || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+        return Err(format!("Invalid app data name {name}"));
+    }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("data");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join(name))
+}
+
+#[tauri::command]
+pub fn appdata_read(app: AppHandle, name: String) -> Result<String, String> {
+    Ok(std::fs::read_to_string(appdata_path(&app, &name)?).unwrap_or_default())
+}
+
+#[tauri::command]
+pub fn appdata_write(app: AppHandle, name: String, content: String) -> Result<(), String> {
+    let p = appdata_path(&app, &name)?;
+    let tmp = p.with_extension("tmp");
+    std::fs::write(&tmp, content).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
+}
+
 const IMPORT_EXTS: &[&str] = &["json", "yaml", "yml", "bru", "har", "txt", "sh", "curl"];
 
 /// Reads user-picked files or folders (outside the workspace) for import. Folders are walked

@@ -11,6 +11,7 @@ const TYPES: { group: string; items: { id: Type; label: string; hint: string }[]
   {
     group: "Common",
     items: [
+      { id: "inherit", label: "Inherit from folder", hint: "Uses the auth set on the nearest folder or collection above this one." },
       { id: "none", label: "No auth", hint: "Nothing is added." },
       { id: "bearer", label: "Bearer token", hint: "Sends Authorization: Bearer with a token you already have." },
       { id: "basic", label: "Basic", hint: "Username and password, base64-encoded in the Authorization header." },
@@ -30,7 +31,7 @@ const TYPES: { group: string; items: { id: Type; label: string; hint: string }[]
 ];
 
 export const AUTH_LABELS: Record<Type, string> = Object.fromEntries(TYPES.flatMap((g) => g.items.map((i) => [i.id, i.label]))) as Record<Type, string>;
-export const AUTH_SHORT: Record<Type, string> = { none: "", bearer: "Bearer", basic: "Basic", apikey: "API key", oauth2: "OAuth 2.0", awsv4: "AWS", digest: "Digest", hawk: "Hawk", jwt: "JWT" };
+export const AUTH_SHORT: Record<Type, string> = { inherit: "", none: "", bearer: "Bearer", basic: "Basic", apikey: "API key", oauth2: "OAuth 2.0", awsv4: "AWS", digest: "Digest", hawk: "Hawk", jwt: "JWT" };
 
 /** Starting values when switching type. Secrets are {{variables}} so nothing sensitive lands in git. */
 function fresh(t: Type): Auth {
@@ -100,7 +101,7 @@ function Text({ label, value, onChange, placeholder, hint, mono = true }: { labe
   );
 }
 
-export default function AuthEditor({ auth, onChange }: { auth: Auth; onChange: (a: Auth) => void }) {
+export default function AuthEditor({ auth, onChange, inherited, onOpenFolder }: { auth: Auth; onChange: (a: Auth) => void; inherited?: { auth: Auth; from?: string }; onOpenFolder?: (path: string) => void }) {
   const hint = TYPES.flatMap((g) => g.items).find((i) => i.id === auth.type)?.hint;
   // Patch helper typed per variant.
   const set = <T extends Auth>(a: T, p: Partial<T>) => onChange({ ...a, ...p });
@@ -121,6 +122,23 @@ export default function AuthEditor({ auth, onChange }: { auth: Auth; onChange: (
         </select>
         {hint && <span className="muted field-hint">{hint}</span>}
       </label>
+
+      {auth.type === "inherit" && inherited && (
+        <div className="card muted">
+          {inherited.from ? (
+            <>
+              Uses <b>{AUTH_LABELS[inherited.auth.type]}</b> from <b>{inherited.from.split("/").pop()}</b>.{" "}
+              {onOpenFolder && (
+                <a href="#" onClick={(e) => (e.preventDefault(), onOpenFolder(inherited.from!))}>
+                  Edit it in folder settings
+                </a>
+              )}
+            </>
+          ) : (
+            "No folder or collection above sets auth, so nothing is added."
+          )}
+        </div>
+      )}
 
       {auth.type === "bearer" && <SecretField label="Token" value={auth.token} varName="token" onChange={(token) => set(auth, { token })} />}
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forge: test REST APIs, MCP servers and AI agents from one desktop app</title>
-  <meta name="description" content="Forge is a free, open source desktop client for REST, GraphQL, WebSocket, MCP servers and A2A agents. Requests are JSON files in your repository. Made by Stellitron.">
+  <meta name="description" content="Forge is a free, open source desktop client for REST, GraphQL, WebSocket, MCP servers and A2A agents. Requests are JSON files in your repository, and Postman and Bruno scripts run unchanged. Made by Stellitron.">
   <meta name="theme-color" content="#f8f9f5">
   <link rel="icon" href="assets/forge.svg" type="image/svg+xml">
   <link rel="canonical" href="https://forge.stellitron.com/">
@@ -133,6 +133,14 @@
     .platform:hover { border-color: var(--primary); }
     .platform span { color: var(--muted-foreground); font-size: 14px; }
     .platform.current { border-color: var(--primary); box-shadow: inset 3px 0 0 var(--primary); }
+    .vt { display: flex; align-items: flex-start; gap: 12px; margin-top: 22px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-size: 15px; line-height: 1.6; color: var(--muted-foreground); }
+    .vt svg { flex-shrink: 0; margin-top: 3px; color: var(--primary); }
+    .vt b { color: var(--foreground); font-weight: 550; }
+    .vt.flagged svg { color: #b45309; }
+    .vt a { color: var(--foreground); }
+    .vt-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted-foreground); }
+    .vt-chip:hover { color: var(--primary); }
+    [hidden] { display: none !important; }
     .maker { margin-top: 28px; font-size: 16px; line-height: 1.7; color: var(--muted-foreground); }
 
     /* Footer */
@@ -176,6 +184,7 @@
       </a>
       <nav class="nav" aria-label="Main navigation">
         <a href="#included">What's included</a>
+        <a href="#switch">Switching</a>
         <a href="#mcp">MCP and agents</a>
         <a href="#privacy">Files and privacy</a>
         <a href="https://github.com/stellitron/forge/blob/main/docs/README.md">Docs</a>
@@ -200,6 +209,10 @@
           <a class="button" id="dl" href="https://github.com/stellitron/forge/releases/latest"><span id="dl-label">Download Forge</span></a>
           <a class="button quiet" href="https://github.com/stellitron/forge/blob/main/docs/getting-started.md">Read the setup guide</a>
           <span class="intro-note" id="dl-note">macOS, Windows and Linux</span>
+          <a class="vt-chip" id="vt-chip" href="#download" hidden>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+            <span id="vt-chip-text"></span>
+          </a>
         </div>
       </div>
       <div class="hero-shot shot">
@@ -214,13 +227,16 @@
         <p class="lead">Everything below works without an AI model or an account.</p>
         <div class="included">
           <dl class="features">
-            <div><dt>Requests</dt><dd>REST and GraphQL with params synced to the URL, <code>:id</code> path variables, Bearer, Basic and API key auth, JSON, XML, form, multipart and file bodies. Paste a <code>curl</code> command to import it.</dd></div>
-            <div><dt>Environments</dt><dd><code>{{baseUrl}}</code> style variables for local, staging and production. Unknown variables are underlined before you send.</dd></div>
-            <div><dt>Tests</dt><dd>Assertions on status, headers, JSONPath, body, time and size. Generate them from a response, capture tokens into variables, run a folder as a suite.</dd></div>
+            <div><dt>Requests</dt><dd>REST and GraphQL with params synced to the URL, <code>:id</code> path variables, Bearer, Basic, API key, OAuth 2.0, AWS Signature, Digest, Hawk and JWT auth, and JSON, XML, form, multipart and file bodies. GraphQL queries complete and check against the server's schema as you type. Paste a <code>curl</code> command to import it.</dd></div>
+            <div><dt>Folders</dt><dd>Set auth, headers, variables and scripts once on a collection or folder, and every request inside inherits them. Sign in once instead of fifty times.</dd></div>
+            <div><dt>Environments</dt><dd><code>{{baseUrl}}</code> style variables for local, staging and production, each with its own cookie jar. Unknown variables are underlined before you send.</dd></div>
+            <div><dt>Tests and scripts</dt><dd>Assertions on status, headers, JSONPath, body, time and size, generated from a response if you like. For anything more, pre-request and post-response scripts with Postman's <code>pm</code> API, including <code>pm.sendRequest</code>.</dd></div>
+            <div><dt>History</dt><dd>Every request you send, ready to open, send again or save. Compare a response with an earlier one, or staging with production, and see exactly which fields changed.</dd></div>
+            <div><dt>Examples and mocks</dt><dd>Save responses as examples for your docs, then serve them from a local mock server so the frontend can start before the backend exists.</dd></div>
+            <div><dt>Website radar</dt><dd>Log into a web app in a separate browser and Forge records the API calls it makes. Pick the ones you want and they become requests, auth included. An AI agent can click through the app to find more.</dd></div>
             <div><dt>Data and reports</dt><dd>JSON becomes a sortable table. Export to Excel, PDF, Word, PowerPoint, CSV or Markdown, computed from the data itself.</dd></div>
             <div><dt>Other protocols</dt><dd>WebSocket with custom headers, A2A agents with streaming tasks, and website checks for headers, caching, security and broken links.</dd></div>
-            <div><dt>Import</dt><dd>Postman, Insomnia, Bruno, OpenAPI, Swagger, HAR and cURL. The format is detected automatically.</dd></div>
-            <div><dt>Code</dt><dd>Turn any request into cURL, fetch, axios, Python, Go, Java, C#, PHP, Ruby, Rust, HTTPie or PowerShell.</dd></div>
+            <div><dt>Code</dt><dd>Turn any request into cURL, fetch, axios, Python, Go, Java, C#, PHP, Ruby, Rust, HTTPie or PowerShell. Press <code>⌘K</code> to jump to any request.</dd></div>
           </dl>
           <figure class="figure">
             <div class="shot">
@@ -233,7 +249,40 @@
       </div>
     </section>
 
-    <section class="band" id="mcp">
+    <section class="band" id="switch">
+      <div class="container two">
+        <div>
+          <h2>Switch from Postman or Bruno without rewriting anything</h2>
+          <p class="lead">Drop in an export and keep working. Forge reads Postman, Insomnia, Bruno, OpenAPI, Swagger, HAR and cURL, and detects the format itself.</p>
+          <div class="steps-text">
+            <p><b>Scripts run as they are.</b> Postman's <code>pm</code>, Bruno's <code>bru</code>, <code>req</code> and <code>res</code>, and Insomnia's scripts, with the Chai-style assertions tests commonly use. They run in the app and in the command-line runner for CI.</p>
+            <p><b>Collections keep their shape.</b> Postman and Bruno collection and folder auth and scripts become folder settings, saved responses become examples, and credentials found in environments go to the local secrets file.</p>
+            <p><b>Imports don't get your trust automatically.</b> Requests you didn't write can't make their own server look like one of yours. Forge asks before a script sends a token anywhere new.</p>
+          </div>
+        </div>
+        <div>
+          <div class="terminal" role="img" aria-label="A Postman script that refreshes a token, running unchanged in Forge">
+            <header><span>A Postman pre-request script</span><span>runs unchanged</span></header>
+            <pre><span class="c">// Fetch a fresh token before each request</span>
+pm.sendRequest({
+  url: pm.environment.get("baseUrl") + "/oauth/token",
+  method: "POST",
+  body: { mode: "urlencoded", urlencoded: [
+    { key: "grant_type", value: "client_credentials" }
+  ] }
+}, (err, res) =&gt; {
+  pm.environment.set("token", res.json().access_token);
+});</pre>
+          </div>
+          <div class="terminal" role="img" aria-label="Running a collection in CI with the Forge command-line runner">
+            <header><span>Then run it in CI</span><span>JUnit or JSON reports</span></header>
+            <pre><span class="p">$</span> node forge.mjs run "Shop API" --env staging --reporter junit</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="mcp">
       <div class="container two">
         <div>
           <h2>MCP servers and agents, in the same client as your APIs</h2>
@@ -265,7 +314,7 @@ save_request     <span class="c">add a request to the workspace</span></pre>
       </div>
     </section>
 
-    <section id="privacy">
+    <section class="band" id="privacy">
       <div class="container two">
         <div>
           <h2>Your requests are files in your repository</h2>
@@ -284,13 +333,15 @@ save_request     <span class="c">add a request to the workspace</span></pre>
           <li><b>No telemetry.</b> The only request Forge makes on its own is the update check, which you can turn off.</li>
           <li><b>Secrets split on import.</b> Tokens and passwords found in imported Postman or Insomnia environments go to the local file.</li>
           <li><b>Approval before AI sends a secret.</b> A request built by an AI that would send a token to a new host waits for you. This check can't be disabled.</li>
+          <li><b>Sandboxed scripts.</b> Scripts have no network or file access. If one tries to redirect a request or send a token somewhere new, Forge asks first.</li>
+          <li><b>History and cookies stay on your computer.</b> They're kept outside the workspace, and history stores secrets as their <code>{{placeholders}}</code>.</li>
           <li><b>Signed updates.</b> Each update is signed by Stellitron and verified before it installs.</li>
           <li><b>Company networks.</b> Forge uses the system proxy and certificate store, so it works on VPNs without setup.</li>
         </ul>
       </div>
     </section>
 
-    <section class="band" id="download">
+    <section id="download">
       <div class="container download">
         <div>
           <h2>Download</h2>
@@ -299,6 +350,10 @@ save_request     <span class="c">add a request to the workspace</span></pre>
             <a class="platform" data-os="mac" href="https://github.com/stellitron/forge/releases/latest">macOS <span>Apple silicon and Intel</span></a>
             <a class="platform" data-os="windows" href="https://github.com/stellitron/forge/releases/latest">Windows <span>10 and 11</span></a>
             <a class="platform" data-os="linux" href="https://github.com/stellitron/forge/releases/latest">Linux <span>AppImage, deb, rpm</span></a>
+          </div>
+          <div class="vt" id="vt" hidden>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+            <span id="vt-text"></span>
           </div>
           <p class="maker">Forge is built by <a class="link" href="https://stellitron.com">Stellitron</a> in Bengaluru and developed in the open. Report bugs or send pull requests on <a class="link" href="https://github.com/stellitron/forge">GitHub</a>.</p>
         </div>
@@ -365,6 +420,44 @@ save_request     <span class="c">add a request to the workspace</span></pre>
       syncTheme();
     });
     syncTheme();
+
+    // VirusTotal results for the latest release, published next to this page by the site workflow.
+    // Shown as they are, flags included; hidden when there are none yet (or when opened locally).
+    (async () => {
+      try {
+        const r = await fetch("virustotal.json", { cache: "no-store" });
+        if (!r.ok) return;
+        const vt = await r.json();
+        if (!vt.files?.length) return;
+        const ua = navigator.userAgent;
+        const os = /Windows/.test(ua) ? "windows" : /Mac/.test(ua) ? "mac" : /Linux|X11/.test(ua) ? "linux" : null;
+        const pick = { mac: [/aarch64\.dmg$/i, /\.dmg$/i], windows: [/-setup\.exe$/i, /\.msi$/i], linux: [/\.AppImage$/i, /\.deb$/i] };
+        const fileFor = (k) => pick[k].map((re) => vt.files.find((f) => re.test(f.name))).find(Boolean);
+        const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+        const version = esc(String(vt.version || "").replace(/^v/, ""));
+        const links = Object.entries({ mac: "macOS", windows: "Windows", linux: "Linux" })
+          .map(([k, label]) => [label, fileFor(k)])
+          .filter(([, f]) => f && /^https:\/\/www\.virustotal\.com\//.test(f.url))
+          .map(([label, f]) => `<a class="link" href="${esc(f.url)}" rel="noopener">${label}</a>`)
+          .join(" · ");
+        const box = document.getElementById("vt");
+        const chip = document.getElementById("vt-chip");
+        if (vt.flagged) {
+          box.classList.add("flagged");
+          document.getElementById("vt-text").innerHTML = `<b>VirusTotal flagged ${vt.flagged} result${vt.flagged === 1 ? "" : "s"}</b> for Forge ${version}, out of about ${vt.engines} engines per file. Unsigned installers sometimes get false positives; each report shows which engine and why. ${links}`;
+          document.getElementById("vt-chip-text").textContent = `${vt.flagged}/${vt.engines} on VirusTotal`;
+        } else {
+          document.getElementById("vt-text").innerHTML = `<b>0 of ${vt.engines} VirusTotal engines</b> flagged Forge ${version}. Every installer is scanned when it's released. Reports: ${links}`;
+          document.getElementById("vt-chip-text").textContent = `0/${vt.engines} on VirusTotal`;
+        }
+        const mine = os && fileFor(os);
+        if (mine) chip.href = mine.url;
+        box.hidden = false;
+        chip.hidden = false;
+      } catch {
+        // No results: nothing to show.
+      }
+    })();
 
     // Point the download links at the installers in the latest GitHub release.
     // Without a release (or offline), they keep linking to the releases page.

@@ -22,10 +22,11 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { fs, http } from "../lib/ipc";
+import { fs } from "../lib/ipc";
 import { toPostmanEnv } from "../lib/exportCollection";
 import { reveal, revealLabel } from "../lib/reveal";
-import type { Environment } from "../lib/types";
+import type { Environment, HttpItem, Item } from "../lib/types";
+import { linkRequestAsModel, requestFormat, requestModelLabel } from "../agent/llm";
 import { importAny } from "../lib/importAny";
 import { setPaneLayout, usePaneDir } from "../components/PaneLayout";
 import ForgeMark from "../components/ForgeMark";
@@ -36,6 +37,8 @@ import { useSettingsNav, type SettingsSection } from "../lib/settingsNav";
 import { checkForUpdates, installUpdate, relaunchApp, useUpdates } from "../lib/updates";
 import { DEFAULT_APPEARANCE, PALETTES, type Appearance, type Palette as PaletteId, type ThemeMode } from "../lib/theme";
 import { PROVIDER_DEFAULTS, aiStatus, secretsPath, useStore, type ProviderId, type Settings } from "../lib/store";
+import { useHistory } from "../lib/history";
+import { openCookies } from "../components/CookiesModal";
 import { KvTable } from "../components/ui";
 import ConnectTools from "../components/ConnectTools";
 
@@ -113,6 +116,8 @@ export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boo
 
 function GeneralSection() {
   const root = useStore((s) => s.root);
+  const historyOn = useStore((s) => s.settings.history?.enabled !== false);
+  const cookiesKept = useStore((s) => s.settings.cookies?.persist !== false);
   const switchWorkspace = async () => {
     const dir = await open({ directory: true, title: "Open or create a Forge workspace folder" });
     if (typeof dir === "string") await useStore.getState().openWorkspace(dir);
@@ -130,12 +135,23 @@ function GeneralSection() {
             </button>
           </div>
         </Row>
+        <Row label="Request history" hint="Every request you send, with secret values stored as their {{placeholders}}. Kept on this computer only, outside the workspace.">
+          <div className="row" style={{ gap: 6 }}>
+            <Switch on={historyOn} onChange={(on) => useStore.getState().saveSettings({ history: { enabled: on } })} label="Keep request history" />
+            <button className="btn sm" onClick={() => (useHistory.getState().clear(), useStore.getState().notify("History cleared"))}>
+              Clear
+            </button>
+          </div>
+        </Row>
       </Group>
       <Group title="Network">
-        <Row label="Cookies" hint="Cookies servers set are kept in memory for this session and sent back automatically.">
-          <button className="btn sm" onClick={() => http.resetCookies().then(() => useStore.getState().notify("Cookies cleared"))}>
-            Clear cookies
-          </button>
+        <Row label="Cookies" hint="Cookies servers set are sent back automatically. Each environment has its own jar, kept on this computer (never in the workspace) unless you turn that off.">
+          <div className="row" style={{ gap: 6 }}>
+            <Switch on={cookiesKept} onChange={(on) => useStore.getState().saveSettings({ cookies: { persist: on } })} label="Keep cookies between sessions" />
+            <button className="btn sm" onClick={openCookies}>
+              Manage
+            </button>
+          </div>
         </Row>
         <Row label="Proxy and certificates" hint="Forge uses your system proxy and trusted certificates, so it works on company VPNs without extra setup." />
       </Group>
@@ -256,7 +272,9 @@ function AiSection() {
         </div>
       </Group>
 
-      {id && p && def && (
+      {id === "request" && def && <RequestModelGroup note={def.help} />}
+
+      {id && id !== "request" && p && def && (
         <Group title={def.label} note={def.help}>
           {def.needsKey || id === "custom" ? (
             <Row label="API key" hint={def.needsKey ? "Stored only on this computer in Forge's app settings (file mode 600), never in your workspace." : "Optional"} stack>
@@ -324,6 +342,35 @@ function AiSection() {
   );
 }
 
+/** Picks the saved request that the "request" provider sends AI turns through. */
+function RequestModelGroup({ note }: { note?: string }) {
+  const items = useStore((s) => s.items);
+  const agent = useStore((s) => s.settings.agent);
+  const requests = Object.values(items)
+    .filter((it): it is HttpItem & Item => it.kind === "http")
+    .sort((a, b) => a.path.localeCompare(b.path));
+  const current = agent.request ? items[agent.request] : undefined;
+  return (
+    <Group title="Request" note={note}>
+      <Row label="Send AI turns through" hint="Tip: right-click a request in the sidebar and choose Use as AI model." stack>
+        <select className="select" value={current ? agent.request : ""} onChange={(e) => e.target.value && linkRequestAsModel(e.target.value)}>
+          <option value="">{agent.request && !current ? `Missing: ${agent.request}` : "Choose a request…"}</option>
+          {requests.map((it) => (
+            <option key={it.path} value={it.path}>
+              {it.method} {it.path.replace(/\.json$/, "")}
+            </option>
+          ))}
+        </select>
+      </Row>
+      {current?.kind === "http" && (
+        <Row label="Model" hint={<span className="mono">{requestModelLabel(current)}</span>}>
+          <span className="muted">Format: {requestFormat(current)}</span>
+        </Row>
+      )}
+    </Group>
+  );
+}
+
 const PROVIDER_NOTES: Record<ProviderId, string> = {
   anthropic: "Claude models",
   openai: "GPT models",
@@ -333,6 +380,7 @@ const PROVIDER_NOTES: Record<ProviderId, string> = {
   bedrock: "AWS, Bedrock API key",
   ollama: "Runs on your computer",
   custom: "Any OpenAI-compatible server",
+  request: "A saved request, e.g. a company gateway",
 };
 
 function UpdatesSection() {
@@ -576,7 +624,7 @@ export function EnvPanel() {
                   Saved in <span className="mono">{env.path}</span> and meant to be committed: URLs, IDs and other non-secret settings.
                 </div>
               </div>
-              <KvTable rows={env.vars} onChange={(vars) => st.saveEnv({ ...env, vars })} keyPh="Variable" />
+              <KvTable rows={env.vars} onChange={(vars) => st.saveEnv({ ...env, vars }, { trust: true })} keyPh="Variable" />
               <div className="pad col" style={{ gap: 4, paddingBottom: 6, marginTop: 10 }}>
                 <h3>Secrets · local only</h3>
                 <div className="muted" style={{ fontSize: 12 }}>

@@ -51,6 +51,7 @@ export default function DocsModal({ root, onClose }: { root: string; onClose: ()
       // Shared values only, to show base URLs. Secrets are never used.
       vars: Object.fromEntries((env?.vars ?? []).filter((v) => v.enabled).map((v) => [v.key, v.value])),
       responses: Object.fromEntries(Object.entries(st.responses).map(([k, r]) => [k, r.res])),
+      folders: st.folders,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, root]);

@@ -24,6 +24,8 @@ export interface ImportSummary {
   bodies: [string, number][];
   withTests: number;
   withDescriptions: number;
+  /** Requests that carry a pre-request or post-response script. */
+  scripts: number;
   envs: { name: string; shared: number; secrets: number }[];
   /** {{names}} used by requests that no imported environment defines. */
   undefinedVars: string[];
@@ -139,6 +141,7 @@ export function summarizeImport(r: ImportResult, sources: Source[] = [], known: 
     bodies: count(reqs.filter((d) => d.bodyMode !== "none"), (d) => BODY_NAMES[d.bodyMode] ?? d.bodyMode),
     withTests: reqs.filter((d) => d.assertions.length > 0).length,
     withDescriptions: reqs.filter((d) => d.description?.trim()).length,
+    scripts: reqs.filter((d) => d.preScript?.trim() || d.postScript?.trim()).length,
     envs: r.envs.map((e) => ({ name: e.name, shared: e.vars.length, secrets: e.secrets.length })),
     undefinedVars,
     issues,

@@ -79,7 +79,9 @@ describe("importers", () => {
     });
     expect(out.items).toHaveLength(1);
     expect(out.items[0]).toMatchObject({ name: "Create", folder: "Orders" });
-    expect(out.items[0].data).toMatchObject({ method: "POST", url: "{{base}}/orders", bodyMode: "json", auth: { type: "bearer", token: "{{tok}}" } });
+    // The collection's auth stays on the collection; the request inherits it, as in Postman.
+    expect(out.items[0].data).toMatchObject({ method: "POST", url: "{{base}}/orders", bodyMode: "json", auth: { type: "inherit" } });
+    expect(out.folders[""].auth).toEqual({ type: "bearer", token: "{{tok}}" });
     expect(out.variables).toEqual([{ key: "base", value: "http://h", enabled: true }]);
   });
 });

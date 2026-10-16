@@ -1,5 +1,5 @@
 import { splitArgs } from "./ipc";
-import { defaults, kv, type Auth, type HttpItem, type JwtAlgorithm, type KV, type OAuth2Auth } from "./types";
+import { defaults, emptyFolder, kv, type Auth, type FolderSettings, type HttpItem, type JwtAlgorithm, type KV, type OAuth2Auth } from "./types";
 
 export interface Imported {
   name: string;
@@ -49,6 +49,8 @@ function postmanAuth(a: any): Auth {
     return typeof v === "string" ? v : v == null ? "" : typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
   };
   switch (a.type) {
+    case "inherit":
+      return { type: "inherit" };
     case "oauth2": {
       const o = a.oauth2;
       const grant = get(o, "grant_type");
@@ -89,14 +91,52 @@ function postmanAuth(a: any): Auth {
   }
 }
 
-/** Postman collection v2.0 / v2.1 → items. Scripts are dropped; auth, body, params and headers carry over. */
-export function importPostman(json: any): { name: string; items: Imported[]; variables: KV[] } {
+/**
+ * Joins scripts that belong to the same level (Bruno's post-response script and its tests). Each
+ * part gets its own block, so both can declare the same names, as they could when run apart.
+ */
+export function joinScripts(parts: { label: string; code: string }[]): string | undefined {
+  const real = parts.filter((p) => p.code.trim());
+  if (!real.length) return undefined;
+  if (real.length === 1) return real[0].code.trim();
+  return real.map((p) => `// ── ${p.label} ──\n{\n${p.code.trim()}\n}`).join("\n\n");
+}
+
+/** A Postman `event` list's script for one phase ("prerequest" or "test"). */
+export function postmanScript(events: any, listen: "prerequest" | "test"): string {
+  const e = Array.isArray(events) ? events.find((x: any) => x?.listen === listen && !x.disabled) : undefined;
+  const exec = e?.script?.exec;
+  return Array.isArray(exec) ? exec.join("\n") : str(exec);
+}
+
+/** A Postman collection or folder's auth and scripts, as Forge folder settings ("" is the collection). */
+function postmanFolder(node: any): FolderSettings | null {
+  const f: FolderSettings = { ...emptyFolder(), ...(node.auth ? { auth: postmanAuth(node.auth) } : {}) };
+  const pre = postmanScript(node.event, "prerequest").trim();
+  const post = postmanScript(node.event, "test").trim();
+  if (pre) f.preScript = pre;
+  if (post) f.postScript = post;
+  return node.auth || pre || post ? f : null;
+}
+
+/**
+ * Postman collection v2.0 / v2.1 → items. Auth, body, params, headers, scripts and saved
+ * responses carry over; collection and folder auth and scripts become folder settings, and
+ * requests without their own auth inherit them, as in Postman.
+ */
+export function importPostman(json: any): { name: string; items: Imported[]; variables: KV[]; folders: Record<string, FolderSettings> } {
   if (!json?.info || !Array.isArray(json.item)) throw new Error("Not a Postman v2 collection (missing info/item)");
   const items: Imported[] = [];
-  const walk = (list: any[], folder: string, inheritedAuth: any) => {
+  const folders: Record<string, FolderSettings> = {};
+  const root = postmanFolder(json);
+  if (root) folders[""] = root;
+  const walk = (list: any[], folder: string) => {
     for (const it of list) {
       if (Array.isArray(it.item)) {
-        walk(it.item, folder ? `${folder}/${it.name}` : str(it.name), it.auth ?? inheritedAuth);
+        const path = folder ? `${folder}/${str(it.name)}` : str(it.name);
+        const f = postmanFolder(it);
+        if (f) folders[path] = f;
+        walk(it.item, path);
         continue;
       }
       const r = it.request ?? {};
@@ -108,7 +148,7 @@ export function importPostman(json: any): { name: string; items: Imported[]; var
       d.url = url;
       d.params = params;
       d.headers = (r.header ?? []).map((h: any) => kv(str(h.key), str(h.value), !h.disabled));
-      d.auth = postmanAuth(r.auth ?? inheritedAuth);
+      d.auth = r.auth ? postmanAuth(r.auth) : { type: "inherit" };
       const b = r.body;
       if (b?.mode === "raw") {
         const lang = b.options?.raw?.language;
@@ -124,12 +164,25 @@ export function importPostman(json: any): { name: string; items: Imported[]; var
         d.bodyMode = "graphql";
         d.graphql = { query: str(b.graphql?.query), variables: str(b.graphql?.variables) || "{}" };
       }
+      // Postman's saved responses become examples.
+      const saved = (it.response ?? []).filter((x: any) => x && typeof x === "object");
+      if (saved.length)
+        d.examples = saved.map((x: any, i: number) => ({
+          name: str(x.name) || `Example ${i + 1}`,
+          status: Number(x.code) || 200,
+          headers: (Array.isArray(x.header) ? x.header : []).map((h: any) => kv(str(h.key), str(h.value))),
+          body: str(x.body),
+        }));
+      const pre = postmanScript(it.event, "prerequest").trim();
+      const post = postmanScript(it.event, "test").trim();
+      if (pre) d.preScript = pre;
+      if (post) d.postScript = post;
       items.push({ name: str(it.name) || `${d.method} ${d.url}`, folder, data: d });
     }
   };
-  walk(json.item, "", json.auth);
+  walk(json.item, "");
   const variables = (json.variable ?? []).map((v: any) => kv(str(v.key), str(v.value), !v.disabled));
-  return { name: str(json.info.name) || "Imported", items, variables };
+  return { name: str(json.info.name) || "Imported", items, variables, folders };
 }
 
 /** Postman environment export → variables. */

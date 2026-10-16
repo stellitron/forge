@@ -6,6 +6,7 @@ Forge is a free, open source desktop client for testing APIs, MCP servers and AI
 
 - [Getting started](getting-started.md): install, create a workspace, send and test your first request.
 - [Editing requests](requests.md): params, headers, auth, bodies, variables, tests, data and reports.
+- [Website radar](website-radar.md): log into a web app and turn the APIs it calls into a collection.
 - [Workspace format](workspace-format.md): the files Forge writes and how to share them with git.
 - [AI features](ai.md): connecting a model, Ask, agentic testing and what data goes where.
 - [Connect AI tools](connect-ai-tools.md): let Claude, Copilot, Cursor and A2A clients use Forge.

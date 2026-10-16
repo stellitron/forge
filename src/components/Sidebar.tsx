@@ -1,6 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { Bot, ChevronRight, Copy, FileDown, Folder, FolderPlus, Globe, Pencil, Play, Plus, Radio, Server, SlidersHorizontal, Trash2, Waypoints, Zap, TerminalSquare, Download, FolderOpen, BookOpen } from "lucide-react";
+import { Bot, ChevronRight, Copy, FileDown, Folder, FolderPlus, Globe, Pencil, Play, Plus, Radio, Server, SlidersHorizontal, Trash2, Waypoints, Zap, TerminalSquare, Download, FolderOpen, BookOpen, Sparkles, Radar, ShieldAlert, ShieldCheck, History, FolderCog } from "lucide-react";
 import { fs } from "../lib/ipc";
 import ExportModal from "./ExportModal";
 import DocsModal from "./DocsModal";
@@ -8,12 +8,16 @@ import { reveal, revealLabel } from "../lib/reveal";
 import { COLLECTIONS, ENV_TAB, basename, dirname, runnerTab, useStore } from "../lib/store";
 import { useConsole } from "../lib/devconsole";
 import { kindLabel, type Item, type ItemKind } from "../lib/types";
-import { Menu, type MenuItem } from "./ui";
+import { Menu, safeGet, safeSet, type MenuItem } from "./ui";
+import HistoryList from "./HistoryList";
+import { mockTab } from "../panels/MockPanel";
+import { folderTab } from "../panels/FolderPanel";
+import { linkRequestAsModel } from "../agent/llm";
 
 export function ItemBadge({ item }: { item: Item }) {
   if (item.kind === "http")
     return item.bodyMode === "graphql" ? <span className="kind k-gql">GQL</span> : <span className={`method m-${item.method}`}>{item.method === "DELETE" ? "DEL" : item.method === "OPTIONS" ? "OPT" : item.method}</span>;
-  const map: Record<Exclude<ItemKind, "http">, [string, string]> = { mcp: ["MCP", "k-mcp"], a2a: ["A2A", "k-a2a"], ws: ["WS", "k-ws"], web: ["WEB", "k-web"], agent: ["AGENT", "k-agent"] };
+  const map: Record<Exclude<ItemKind, "http">, [string, string]> = { mcp: ["MCP", "k-mcp"], a2a: ["A2A", "k-a2a"], ws: ["WS", "k-ws"], web: ["WEB", "k-web"], radar: ["RADAR", "k-radar"], agent: ["AGENT", "k-agent"] };
   const [t, c] = map[item.kind];
   return <span className={`kind ${c}`}>{t}</span>;
 }
@@ -24,6 +28,7 @@ const NEW: { kind: ItemKind; icon: ReactNode; name: string }[] = [
   { kind: "a2a", icon: <Waypoints size={14} />, name: "A2A agent" },
   { kind: "ws", icon: <Radio size={14} />, name: "WebSocket" },
   { kind: "web", icon: <Globe size={14} />, name: "Web check" },
+  { kind: "radar", icon: <Radar size={14} />, name: "Website radar" },
   { kind: "agent", icon: <Bot size={14} />, name: "Agent test" },
 ];
 
@@ -37,6 +42,15 @@ export default function Sidebar() {
   const [docsFor, setDocsFor] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: (MenuItem | "-")[] } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [view, setView] = useState<"collections" | "history">(() => (safeGet("sideView") === "history" ? "history" : "collections"));
+  useEffect(() => safeSet("sideView", view), [view]);
+  useEffect(() => {
+    const show = (e: Event) => setView((e as CustomEvent).detail === "history" ? "history" : "collections");
+    window.addEventListener("forge:side-view", show);
+    return () => window.removeEventListener("forge:side-view", show);
+  }, []);
+  const trustAsked = useStore((s) => s.trustAsked);
+  const untrusted = useStore((s) => (s.trustPrints ? Object.values(s.items).filter((i) => !s.isTrusted(i)).length : 0));
   const [filter, setFilter] = useState("");
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
@@ -93,7 +107,12 @@ export default function Sidebar() {
       items: [
         ...newMenu(path),
         "-",
+        { label: path.split("/").length === 2 ? "Collection settings" : "Folder settings", icon: <FolderCog size={14} />, onClick: () => openTab(folderTab(path)) },
         { label: "Run folder", icon: <Play size={14} />, onClick: () => openTab(runnerTab(path)) },
+        { label: "Mock server", icon: <Server size={14} />, onClick: () => openTab(mockTab(path)) },
+        ...(Object.values(items).some((i) => i.path.startsWith(`${path}/`) && !st.isTrusted(i))
+          ? [{ label: "Trust requests in this folder", icon: <ShieldCheck size={14} />, onClick: () => (st.trust([path]), st.notify("Trusted. These requests' hosts now count as yours.")) }]
+          : []),
         { label: "Generate docs…", icon: <BookOpen size={14} />, onClick: () => setDocsFor(path) },
         { label: "Export…", icon: <Download size={14} />, onClick: () => setExporting(path) },
         { label: revealLabel, icon: <FolderOpen size={14} />, onClick: () => reveal(path) },
@@ -116,6 +135,7 @@ export default function Sidebar() {
       items: [
         { label: "Rename", icon: <Pencil size={14} />, onClick: () => setRenaming(it.path) },
         { label: "Duplicate", icon: <Copy size={14} />, onClick: () => st.duplicateItem(it.path) },
+        ...(it.kind === "http" ? [{ label: "Use as AI model", icon: <Sparkles size={14} />, onClick: () => linkRequestAsModel(it.path) }] : []),
         { label: revealLabel, icon: <FolderOpen size={14} />, onClick: () => reveal(it.path) },
         "-",
         { label: "Delete", icon: <Trash2 size={14} />, danger: true, onClick: async () => (await ask(`Delete "${it.name}"?`, { kind: "warning" })) && st.deleteItem(it.path) },
@@ -212,6 +232,9 @@ export default function Sidebar() {
         <span className="ws" title={root ?? ""}>
           {root ? basename(root) : "Forge"}
         </span>
+        <button className={`btn ghost icon sm ${view === "history" ? "on" : ""}`} title={view === "history" ? "Show collections" : "Show history"} onClick={() => setView(view === "history" ? "collections" : "history")}>
+          <History size={14} />
+        </button>
         <button className="btn ghost icon sm" title="Import collection (Postman, Insomnia, Bruno, OpenAPI, HAR, cURL)" onClick={() => st.setImporting(true)}>
           <FileDown size={14} />
         </button>
@@ -219,8 +242,20 @@ export default function Sidebar() {
           <FolderPlus size={14} />
         </button>
       </div>
-      <input className="input side-search" placeholder="Search" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <div className="tree" onDragOver={dragOver(COLLECTIONS)} onDrop={drop(COLLECTIONS)}>
+      <input className="input side-search" placeholder={view === "history" ? "Search history" : "Search"} value={filter} onChange={(e) => setFilter(e.target.value)} />
+      {view === "history" && <HistoryList filter={filter} />}
+      {view === "collections" && trustAsked && untrusted > 0 && (
+        <div className="row muted" style={{ padding: "4px 12px", fontSize: 11.5 }} title="Imported, or new or changed outside Forge since you last trusted them. Forge asks before scripts or AI send anything to hosts only these use.">
+          <ShieldAlert size={12} className="warn" />
+          <span className="grow">
+            {untrusted} request{untrusted === 1 ? "" : "s"} not trusted yet
+          </span>
+          <a href="#" onClick={(e) => (e.preventDefault(), st.decideWorkspaceTrust(true))}>
+            Trust all
+          </a>
+        </div>
+      )}
+      <div className="tree" style={view === "history" ? { display: "none" } : undefined} onDragOver={dragOver(COLLECTIONS)} onDrop={drop(COLLECTIONS)}>
         {collections.map((c) => renderDir(c, 0))}
         {children[COLLECTIONS]?.items.map((it) => (
           <div key={it.path} className={`node ${active === it.path ? "active" : ""}`} onClick={() => openTab(it.path)} onContextMenu={(e) => itemMenu(it, e)}>

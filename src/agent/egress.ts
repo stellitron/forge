@@ -1,4 +1,5 @@
 import { interpolate } from "../lib/eval";
+import { effectiveItem } from "../lib/inherit";
 import { useStore } from "../lib/store";
 import type { Item } from "../lib/types";
 
@@ -58,8 +59,12 @@ function carried(text: string, secrets: [string, string][]): string[] {
 
 const flatten = (o: Outgoing) => [o.url, ...o.headers.map((h) => `${h.key}: ${h.value}`), o.body ?? ""].join("\n");
 
-/** Hosts the user's own saved requests and environments talk to, with the secrets each one receives. */
-export function knownHosts(vars: Record<string, string>, secrets: [string, string][], extraHosts: string[] = []): Map<string, Set<string>> {
+/**
+ * Hosts the user's own saved requests and environments talk to, with the secrets each one receives.
+ * Imported items and environments the user hasn't trusted yet don't count, or a collection could
+ * vouch for its own server (`includeUntrusted` is only for explaining a prompt).
+ */
+export function knownHosts(vars: Record<string, string>, secrets: [string, string][], extraHosts: string[] = [], includeUntrusted = false): Map<string, Set<string>> {
   const known = new Map<string, Set<string>>();
   const add = (host: string, names: string[] = []) => {
     if (!host) return;
@@ -67,27 +72,32 @@ export function knownHosts(vars: Record<string, string>, secrets: [string, strin
     names.forEach((n) => s.add(n));
     known.set(host, s);
   };
-  const { items, envs } = useStore.getState();
+  const { items, envs, folders, isTrusted, isEnvTrusted, isFolderTrusted, varsFor } = useStore.getState();
   for (const it of Object.values(items) as Item[]) {
-    if (aiCreated.has(it.path) || !("url" in it) || typeof it.url !== "string") continue;
-    let url = interpolate(it.url, vars);
+    if (aiCreated.has(it.path) || (!includeUntrusted && !isTrusted(it)) || !("url" in it) || typeof it.url !== "string") continue;
+    // Collection and folder variables, headers and inherited auth are part of what the request sends.
+    const v = { ...varsFor(it.path), ...vars };
+    const sent = it.kind === "http" ? effectiveItem(it) : it;
+    let url = interpolate(it.url, v);
     if (it.kind === "ws") url = url.replace(/^ws/i, "http");
-    const names = carried(interpolate(JSON.stringify(it), vars), secrets);
+    const names = carried(interpolate(JSON.stringify(sent), v), secrets);
     add(hostOf(url), names);
     // The user's own OAuth endpoints receive their client secret and tokens.
-    if (it.kind === "http" && it.auth.type === "oauth2") add(hostOf(interpolate(it.auth.tokenUrl, vars)), names);
+    if (sent.kind === "http" && sent.auth.type === "oauth2") add(hostOf(interpolate(sent.auth.tokenUrl, v)), names);
   }
+  // Base URLs in trusted collection and folder variables count as the user's own APIs, like environments'.
+  for (const [p, f] of Object.entries(folders)) if (includeUntrusted || isFolderTrusted(p)) for (const x of f.vars) if (x.enabled && /^https?:\/\//i.test(x.value)) add(hostOf(interpolate(x.value, vars)));
   // Base URLs in any environment count as the user's own APIs.
-  for (const e of envs) for (const v of e.vars) if (/^https?:\/\//i.test(v.value)) add(hostOf(interpolate(v.value, vars)));
+  for (const e of envs.filter((x) => includeUntrusted || isEnvTrusted(x))) for (const v of e.vars) if (/^https?:\/\//i.test(v.value)) add(hostOf(interpolate(v.value, vars)));
   for (const h of extraHosts) add(h);
   for (const [h, names] of allowed) add(h, [...names]);
   return known;
 }
 
-export function checkEgress(raw: Outgoing, sent: Outgoing, opts: { vars: Record<string, string>; extraHosts?: string[] }): EgressVerdict {
+export function checkEgress(raw: Outgoing, sent: Outgoing, opts: { vars: Record<string, string>; extraHosts?: string[]; ignore?: Set<string> }): EgressVerdict {
   const secrets = secretValues();
   const host = hostOf(sent.url);
-  const used = carried(flatten(sent), secrets);
+  const used = carried(flatten(sent), secrets).filter((n) => !opts.ignore?.has(n));
   const known = knownHosts(opts.vars, secrets, opts.extraHosts);
   const v: EgressVerdict = { host, secrets: used };
   if (!host) return v; // invalid URL; the request will fail on its own
@@ -95,7 +105,8 @@ export function checkEgress(raw: Outgoing, sent: Outgoing, opts: { vars: Record<
   // Show placeholders, not values, in the prompt.
   const shown = `${raw.url.length > 140 ? raw.url.slice(0, 140) + "…" : raw.url}`;
   const carrying = used.length ? ` It would carry the secret value${used.length > 1 ? "s" : ""} of ${used.map((n) => `{{${n}}}`).join(", ")}.` : "";
-  if (!where) v.reason = `Request to ${host}, which none of your saved requests use: ${shown}.${carrying}`;
+  const imported = !where && knownHosts(opts.vars, secrets, opts.extraHosts, true).has(host) ? " Only requests you haven't trusted use it." : "";
+  if (!where) v.reason = `Request to ${host}, which none of your saved requests use: ${shown}.${carrying}${imported}`;
   else {
     const fresh = used.filter((n) => !where.has(n));
     if (fresh.length) v.reason = `Request sends ${fresh.map((n) => `{{${n}}}`).join(", ")} to ${host}, where your saved requests don't send it: ${shown}.`;

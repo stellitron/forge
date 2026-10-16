@@ -1,3 +1,4 @@
+import type { Extension } from "@codemirror/state";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import CodeMirror, { EditorView } from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
@@ -22,6 +23,7 @@ export function Editor({
   readOnly,
   placeholder,
   wrap = true,
+  extensions: extra,
 }: {
   value: string;
   onChange?: (v: string) => void;
@@ -29,17 +31,19 @@ export function Editor({
   readOnly?: boolean;
   placeholder?: string;
   wrap?: boolean;
+  /** Extra CodeMirror extensions, e.g. a language with a schema. Replaces the built-in language when given. */
+  extensions?: Extension[];
 }) {
   const dark = useDark();
   const extensions = useMemo(() => {
-    const ext = [];
+    const ext: Extension[] = [...(extra ?? [])];
     if (lang === "json") ext.push(json());
-    if (lang === "js" || lang === "graphql") ext.push(javascript());
+    if ((lang === "js" || lang === "graphql") && !extra?.length) ext.push(javascript());
     if (lang === "html") ext.push(html());
     if (lang === "xml") ext.push(xml());
     if (wrap) ext.push(EditorView.lineWrapping);
     return ext;
-  }, [lang, wrap]);
+  }, [lang, wrap, extra]);
   return (
     <div className="editor">
       <CodeMirror

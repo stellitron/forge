@@ -44,14 +44,34 @@ Forge writes `*.local.json` into the workspace `.gitignore` when it opens the fo
   "body": "",
   "assertions": [{ "enabled": true, "source": "status", "path": "", "op": "eq", "value": "200" }],
   "extractions": [{ "enabled": true, "variable": "userId", "source": "jsonpath", "path": "$[0].id" }],
-  "settings": { "timeoutMs": 30000, "followRedirects": true, "insecure": false }
+  "settings": { "timeoutMs": 30000, "followRedirects": true, "insecure": false },
+  "postScript": "pm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
 }
 ```
 
 - `forge` is the file format version.
-- `kind` is one of `http`, `mcp`, `a2a`, `ws`, `web` or `agent`.
+- `kind` is one of `http`, `mcp`, `a2a`, `ws`, `web`, `radar` or `agent`.
+- `examples` holds saved responses (`name`, `status`, `headers`, `body`), the first being the default. See [Examples](requests.md#examples).
+- `auth` can be `{ "type": "inherit" }` to use the nearest folder's auth.
+- `preScript` and `postScript` are optional JavaScript, run before sending and after the response (see [Scripts](requests.md#scripts)).
 - `params` mirrors the URL query. Disabled params live only in this list.
+- Which requests you trust isn't stored in the workspace, so a collection can't trust itself. See [Workspace trust](security.md#workspace-trust).
 - Fields Forge doesn't recognise are kept, so newer files open in older versions without losing data.
+
+## Folder settings
+
+`collections/Shop/_folder.json` holds what a folder (here, the Shop collection) passes down to everything inside it. See [Folder and collection settings](requests.md#folder-and-collection-settings).
+
+```json
+{
+  "forge": 1,
+  "kind": "folder",
+  "auth": { "type": "bearer", "token": "{{token}}" },
+  "headers": [{ "key": "X-Tenant", "value": "acme", "enabled": true }],
+  "vars": [{ "key": "baseUrl", "value": "https://api.shop.test", "enabled": true }],
+  "preScript": "pm.request.headers.upsert({ key: 'X-Request-Id', value: crypto.randomUUID() });"
+}
+```
 
 ## An environment
 

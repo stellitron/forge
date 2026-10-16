@@ -64,6 +64,8 @@ jobs:
 
       # Apple signing is optional. Its variables are only set when the secrets exist, because the
       # bundler tries to import a certificate whenever APPLE_CERTIFICATE is defined, even if empty.
+      # Notarization uses an App Store Connect API key when one is set (no 2FA or app-specific
+      # password involved), and otherwise the Apple ID with an app-specific password.
       - name: Use Apple signing when configured
         if: runner.os == 'macOS'
         env:
@@ -73,12 +75,25 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
         run: |
           if [ -z "$APPLE_CERTIFICATE" ]; then
             echo "::notice::No Apple certificate configured; the macOS app will be unsigned."
             exit 0
           fi
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+          if [ -n "$APPLE_API_PRIVATE_KEY" ]; then
+            key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+            printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
+            chmod 600 "$key"
+            echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+            unset APPLE_ID APPLE_PASSWORD
+          elif [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::APPLE_CERTIFICATE is set but notarization isn't: add the App Store Connect API key secrets, or APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID. See docs/releasing.md."
+            exit 1
+          fi
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_API_ISSUER APPLE_API_KEY; do
             value="${!name}"
             if [ -n "$value" ]; then
               delimiter="EOF_$(openssl rand -hex 8)"
@@ -116,3 +131,76 @@ jobs:
         run: gh release upload "$GITHUB_REF_NAME" dist-cli/forge.mjs --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Checksums and GitHub build provenance for every file in the release, so anyone can check a
+  # download is exactly what this workflow built from this repo: gh attestation verify <file> -R <repo>.
+  provenance:
+    name: Checksums and provenance
+    needs: [build, cli]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the draft release's files
+        run: |
+          mkdir dist
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir dist
+          rm -f dist/SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: sha256sum -- * > ../SHA256SUMS && cat ../SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: SHA256SUMS
+      - name: Attach SHA256SUMS
+        run: gh release upload "$GITHUB_REF_NAME" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Scans the installers on VirusTotal, adds the results to the release notes and attaches
+  # virustotal.json, which the website and README badge read once the release is published.
+  # Runs after provenance, so SHA256SUMS and the attestations cover exactly the build's files.
+  virustotal:
+    name: VirusTotal
+    needs: provenance
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Download the installers
+        run: |
+          mkdir dist
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan
+        run: node scripts/virustotal.mjs scan dist --version "$GITHUB_REF_NAME" --out virustotal.json --markdown virustotal.md
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+      - name: Add the results to the release
+        if: hashFiles('virustotal.json') != ''
+        run: |
+          gh release upload "$GITHUB_REF_NAME" virustotal.json --repo "$GITHUB_REPOSITORY" --clobber
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body -q .body > notes.md
+          node --input-type=module -e 'import fs from "node:fs"; import { withSection } from "./scripts/virustotal.mjs"; fs.writeFileSync("notes.md", withSection(fs.readFileSync("notes.md", "utf8"), fs.readFileSync("virustotal.md", "utf8").trim()));'
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Results are already on the draft; failing here makes a flag impossible to miss before Publish.
+      - name: Stop if any engine flagged a file
+        if: hashFiles('virustotal.flagged') != ''
+        run: |
+          n=$(cat virustotal.flagged)
+          if [ "$n" != "0" ]; then
+            echo "::error::VirusTotal engines flagged $n result(s). Open each report from the draft's notes before publishing. Publishing shows this result on the website and the README badge."
+            exit 1
+          fi

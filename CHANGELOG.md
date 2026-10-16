@@ -4,6 +4,26 @@ All notable changes to Forge are listed here. The format follows [Keep a Changel
 
 ## Unreleased
 
+### Added
+
+- Request history: every send, kept per workspace on this computer with secrets stored as placeholders. Open, send again or save as a request.
+- Compare responses: what changed since an earlier response to the same request, by JSON path or line, for example staging against production.
+- Folder and collection settings: auth, headers, variables and scripts that everything inside inherits. Postman and Bruno folder settings import as folder settings.
+- Quick open (⌘K): jump to any request, folder, environment, recent send or action.
+- Saved examples: keep responses with a request, used in docs, exports and AI context. Imported from Postman saved responses and OpenAPI examples.
+- Mock server: serves a folder's examples on 127.0.0.1 for frontend work, answering local pages only.
+- Cookie manager: one shared jar per environment, kept between sessions, which you can view and edit.
+- `pm.sendRequest` and `bru.sendRequest` in scripts, checked like AI-built requests.
+- GraphQL schema loading with completion and error checking as you type.
+- Pre-request and post-response scripts. Postman (`pm`), Bruno (`bru`, `req`, `res`) and Insomnia scripts run unchanged and are kept on import and on Postman export. Scripts run sandboxed, with no network or file access, in under a millisecond, and the CLI runs them too. Forge asks before a script redirects a request, attaches a secret to a new host, or points a variable at a new host. The CLI blocks these unless run with `--trust-scripts`. Workspace trust: Forge asks once whether you trust a workspace, and remembers trusted content by fingerprint in its own settings, outside the workspace. Imports, AI-saved requests and anything changed outside Forge, for example by a git pull, don't vouch for their hosts until you trust them.
+- Website radar: log into a web app in a separate browser, capture the APIs it calls, optionally let an AI agent explore it (changes blocked by default), then pick endpoints, by hand or with AI, and import them with the session's credentials.
+
+### Changed
+
+- Releases are scanned on VirusTotal, with the results in the release notes, on the website and in a README badge, alongside `SHA256SUMS` and GitHub build provenance.
+- New requests inherit their folder's auth.
+- The CLI runs scripts in a worker thread with no environment or network access, so a runaway script can't hang a CI job.
+
 ## 0.1.0 (2026-10-14)
 
 First public release.

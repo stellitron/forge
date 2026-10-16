@@ -1,3 +1,4 @@
+import { effectiveItem } from "../lib/inherit";
 import { useMemo, useState } from "react";
 import { Copy } from "lucide-react";
 import { writeText } from "../lib/clipboard";
@@ -7,13 +8,16 @@ import { useStore } from "../lib/store";
 import type { HttpItem } from "../lib/types";
 import { Editor, Modal, safeGet, safeSet, type Lang } from "./ui";
 
-export default function CodeModal({ item, onClose }: { item: HttpItem; onClose: () => void }) {
+export default function CodeModal({ item, onClose }: { item: HttpItem & { path?: string }; onClose: () => void }) {
   const [lang, setLang] = useState<LangId>(() => (safeGet("codegen:lang") as LangId) ?? "curl");
   // Off by default so shared snippets don't leak tokens from the environment.
   const [resolve, setResolve] = useState(false);
   const code = useMemo(() => {
     try {
-      return generate(lang, buildRequest(item, resolve ? useStore.getState().vars() : {}));
+      // Snippets show what's actually sent, folder headers and inherited auth included.
+      const st = useStore.getState();
+      const sent = item.path ? effectiveItem({ ...item, path: item.path }) : item;
+      return generate(lang, buildRequest(sent, resolve ? (item.path ? st.varsFor(item.path) : st.vars()) : {}));
     } catch (e) {
       return `// ${e}`;
     }

@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
-import { runAssertions, runExtractions } from "../lib/eval";
+import { executeHttp } from "../lib/execute";
 import { uid } from "../lib/ipc";
-import { sendItem } from "../lib/sendItem";
 import { COLLECTIONS, useStore } from "../lib/store";
 import type { AssertionResult, Environment, HttpItem, Item, KV } from "../lib/types";
 
@@ -25,6 +24,8 @@ export interface RunOptions {
   bail: boolean;
   timeoutMs?: number;
   insecure?: boolean;
+  /** Allow script changes that point requests at new hosts; refused otherwise, as there's no one to ask. */
+  trustScripts?: boolean;
   delayMs: number;
 }
 
@@ -41,6 +42,8 @@ export interface RequestResult {
   error?: string;
   tests: AssertionResult[];
   passed: boolean;
+  /** console output from the request's scripts. */
+  logs?: string[];
 }
 
 export interface RunResult {
@@ -164,18 +167,17 @@ export async function runCollection(opts: RunOptions, onResult?: (r: RequestResu
         passed: false,
       };
       try {
-        const { res } = await sendItem(item, uid(), "cli", { interactive: false });
+        const { res, results: tests, extracted, logs } = await executeHttp(item, uid(), "cli", { interactive: false, confirm: opts.trustScripts ? async () => true : undefined });
         r.status = res.status;
         r.timeMs = Math.round(res.timeMs);
-        r.tests = runAssertions(item.assertions, res, useStore.getState().vars());
-        const captured = runExtractions(item.extractions, res);
-        if (Object.keys(captured).length) {
-          useStore.getState().setVars(captured);
-          for (const v of Object.values(captured)) if (v.length >= 8) secretSet.add(v);
-        }
+        r.tests = tests;
+        if (logs.length) r.logs = logs.map((l) => l.text);
+        for (const v of Object.values(extracted)) if (v.length >= 8) secretSet.add(v);
         r.passed = r.tests.every((t) => t.pass);
       } catch (err) {
         r.error = err instanceof Error ? err.message : String(err);
+        const logs = (err as { logs?: { text: string }[] }).logs;
+        if (logs?.length) r.logs = logs.map((l) => l.text);
       }
       // Anything that looks like a credential (by name) is masked in output from now on.
       for (const [k, v] of Object.entries(useStore.getState().vars())) if (v && v.length >= 6 && /token|secret|key|pass|auth|cookie|session|credential/i.test(k)) secretSet.add(v);

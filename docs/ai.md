@@ -6,6 +6,7 @@ AI in Forge is optional. Every feature that sends requests, runs tests, imports,
 - **Suggest** on the Params and Headers tabs.
 - **Smart request names**, polished once after a new request's first response.
 - **Agentic tests**: an agent that explores an API, MCP server or A2A agent and writes a test report.
+- **Website radar**: an agent that clicks through a web app to find its APIs, and picks and names endpoints for import (see [Website radar](website-radar.md)).
 - **A2A replies** when other agents talk to Forge (see [Connect AI tools](connect-ai-tools.md)).
 
 ## Connect a model
@@ -24,8 +25,13 @@ Open **Settings, AI model**, pick a provider, paste your key and choose a model.
 | Amazon Bedrock | `https://bedrock-runtime.<region>.amazonaws.com` | a model or inference profile ID, with a Bedrock API key |
 | Ollama | `http://localhost:11434/v1` | a local model, for example `qwen3:14b` |
 | Custom | any OpenAI-compatible URL | your model name |
+| From a request | a saved request in your workspace | taken from the request |
 
 The model must support tool calling for Ask and agentic tests. Leave the endpoint empty to use the default, or set it to use a company gateway or proxy.
+
+### Use a saved request as the model
+
+If your company reaches Claude or another model through its own gateway, first build a request that works in Forge. Then right-click it in the sidebar and choose **Use as AI model**, or pick **From a request** in Settings. Every AI turn goes through that request with its URL, headers and auth, including environment variables and OAuth. Forge reads the request's JSON body to choose the format: Anthropic Messages (for example, Bedrock `InvokeModel` with `anthropic_version`), Bedrock Converse, or OpenAI chat. It replaces the messages, system prompt and tools, and keeps everything else, like `anthropic_version` or `temperature`. Replies are read in any of the three shapes. The gateway must pass tool definitions through for Ask and agentic tests to work.
 
 Your key is stored in Forge's app settings on your computer (see [Workspace format](workspace-format.md#settings-outside-the-workspace)), never in the workspace.
 

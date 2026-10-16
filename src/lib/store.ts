@@ -2,19 +2,35 @@ import { create } from "zustand";
 import { fs } from "./ipc";
 import { varsOf } from "./eval";
 import { applyAppearance, type Appearance } from "./theme";
-import { defaults, type AssertionResult, type Environment, type HttpResponse, type Item, type ItemData, type ItemKind, type KV } from "./types";
+import { envFingerprint, fingerprint, folderFingerprint } from "./trust";
+import { defaults, emptyFolder, type FolderSettings, type AssertionResult, type Environment, type HttpResponse, type Item, type ItemData, type ItemKind, type KV } from "./types";
 
-export type ProviderId = "anthropic" | "openai" | "openrouter" | "gemini" | "azure" | "bedrock" | "ollama" | "custom";
+export type ProviderId = "anthropic" | "openai" | "openrouter" | "gemini" | "azure" | "bedrock" | "ollama" | "custom" | "request";
 
 export interface Settings {
   lastWorkspace?: string;
   activeEnv?: Record<string, string>; // workspace root -> env path
   providers: Record<ProviderId, { apiKey: string; baseUrl: string }>;
   /** provider "" means AI isn't set up yet; Forge works fully without it. */
-  agent: { provider: ProviderId | ""; model: string; effort: "low" | "medium" | "high" | "xhigh" | "max" };
+  agent: {
+    provider: ProviderId | "";
+    model: string;
+    effort: "low" | "medium" | "high" | "xhigh" | "max";
+    /** Workspace path of the saved request the "request" provider sends each turn through. */
+    request?: string;
+  };
+  /**
+   * Workspace root → fingerprints of the requests and environments you trust (see trust.ts).
+   * Kept here, outside the workspace, so a collection's own files can't grant themselves trust.
+   */
+  trust?: Record<string, { prints: string[] }>;
   /** Forge's own MCP + A2A server for Claude, VS Code, Cursor, Copilot and A2A clients. */
   server?: { enabled: boolean; port: number; token: string; approveWrites: boolean };
   ai?: { autoName?: boolean };
+  /** Cookies are kept per environment between sessions unless turned off. */
+  cookies?: { persist: boolean };
+  /** Request history; on unless turned off. */
+  history?: { enabled: boolean };
   appearance?: Appearance;
   layout?: { panes?: "side" | "stacked" };
   /** Set once the first-run guide is finished or skipped. */
@@ -27,6 +43,7 @@ export function aiStatus(s: Settings): { ready: boolean; label: string; missing?
   const id = s.agent.provider;
   if (!id) return { ready: false, label: "No AI model", missing: "Choose an AI provider in Settings" };
   const def = PROVIDER_DEFAULTS[id];
+  if (id === "request") return s.agent.request ? { ready: true, label: def.label } : { ready: false, label: def.label, missing: "Pick a request to use as the AI model in Settings" };
   if (def.needsKey && !s.providers[id]?.apiKey) return { ready: false, label: def.label, missing: `Add your ${def.label} API key in Settings` };
   if (!s.agent.model) return { ready: false, label: def.label, missing: "Choose a model in Settings" };
   return { ready: true, label: def.label };
@@ -61,6 +78,13 @@ export const PROVIDER_DEFAULTS: Record<ProviderId, { label: string; baseUrl: str
   },
   ollama: { label: "Ollama (local)", baseUrl: "http://localhost:11434/v1", model: "", needsKey: false },
   custom: { label: "Custom OpenAI-compatible", baseUrl: "http://localhost:1234/v1", model: "", needsKey: false },
+  request: {
+    label: "From a request",
+    baseUrl: "",
+    model: "",
+    needsKey: false,
+    help: "Each AI turn is sent through a saved request with its URL, headers and auth, so a company gateway that works in Forge works for AI too. The body format (Anthropic, Bedrock Converse or OpenAI chat) is taken from the request's JSON body; other fields in it, like anthropic_version or temperature, are kept.",
+  },
 };
 
 const defaultSettings = (): Settings => ({
@@ -83,6 +107,8 @@ export interface ResponseState {
   error?: string;
   results?: AssertionResult[];
   extracted?: Record<string, string>;
+  /** The history entry recording this response, so Compare can leave it out. */
+  historyId?: string;
 }
 
 interface State {
@@ -109,8 +135,19 @@ interface State {
   saveSettings(patch: Partial<Settings>): Promise<void>;
   notify(text: string, kind?: "info" | "error"): void;
 
-  createItem(folder: string, kind: ItemKind, name: string, data?: ItemData): Promise<string>;
-  updateItem(path: string, patch: Partial<ItemData> & { name?: string }): void;
+  /** Folder settings by folder path (see FolderSettings). */
+  folders: Record<string, FolderSettings>;
+  /** `trusted: false` for settings you didn't write (imports). */
+  saveFolder(path: string, settings: FolderSettings, opts?: { trusted?: boolean }): Promise<void>;
+  /** The folders above an item that can pass settings down, outermost first. */
+  folderChain(path: string): string[];
+  /** Variables for a request: its collection and folder variables, then the environment's. */
+  varsFor(path: string): Record<string, string>;
+  isFolderTrusted(path: string): boolean;
+  /** `trusted: false` for items you didn't write (imports, AI): they don't vouch for their hosts. */
+  createItem(folder: string, kind: ItemKind, name: string, data?: ItemData, opts?: { trusted?: boolean }): Promise<string>;
+  /** `trusted: false` for changes you didn't make (the AI): the item stops vouching for its hosts. */
+  updateItem(path: string, patch: Partial<ItemData> & { name?: string }, opts?: { trusted?: boolean }): void;
   deleteItem(path: string): Promise<void>;
   duplicateItem(path: string): Promise<void>;
   /** Moves to another folder; returns the new path. */
@@ -120,8 +157,22 @@ interface State {
   createFolder(path: string): Promise<void>;
   deleteFolder(path: string): Promise<void>;
 
-  saveEnv(env: Environment): Promise<void>;
-  createEnv(name: string, vars?: KV[], secrets?: KV[]): Promise<void>;
+  /** `trust`: the change comes from you (the environment editor), so its URLs count as yours. */
+  saveEnv(env: Environment, opts?: { trust?: boolean }): Promise<void>;
+  createEnv(name: string, vars?: KV[], secrets?: KV[], opts?: { trusted?: boolean }): Promise<void>;
+
+  /** Fingerprints of trusted content in this workspace (see trust.ts). */
+  trustPrints: Set<string>;
+  /** Whether you've answered "trust this workspace?" for it. */
+  trustAsked: boolean;
+  /** The CLI runs a checked-out repo, which it trusts like any test runner trusts its repo. */
+  trustEverything: boolean;
+  isTrusted(item: Item): boolean;
+  isEnvTrusted(env: Environment): boolean;
+  /** Trusts the items under these folders or paths, and these environments, as they are now. */
+  trust(paths: string[], envPaths?: string[]): void;
+  /** Answers the first-open question: trust everything as it is now, or nothing yet. */
+  decideWorkspaceTrust(trusted: boolean): void;
   /** One-click "New Environment" (unique name), activated if none is. Returns its path. */
   newEnv(): Promise<string>;
   renameEnv(path: string, name: string): Promise<string>;
@@ -134,10 +185,14 @@ interface State {
 
   openTab(id: string): void;
   closeTab(id: string): void;
+  /** Closes several tabs at once; the active tab stays if it isn't one of them. */
+  closeTabs(ids: string[]): void;
   setResponse(path: string, r: ResponseState): void;
 }
 
 export const COLLECTIONS = "collections";
+/** Folder settings file name; request files are slugs, which never start with "_". */
+export const FOLDER_FILE = "_folder.json";
 const ENVIRONMENTS = "environments";
 const LOCAL = ".local.json";
 /** Lines every workspace .gitignore must contain so secrets never reach git. */
@@ -182,6 +237,32 @@ export const useStore = create<State>((set, get) => {
     });
   };
 
+  // Fingerprints are cached per object; items and environments are replaced, never mutated.
+  const prints = new WeakMap<object, string>();
+  const fp = (it: Item) => prints.get(it) ?? (prints.set(it, fingerprint(it)), prints.get(it)!);
+  const efp = (e: Environment) => prints.get(e) ?? (prints.set(e, envFingerprint(e)), prints.get(e)!);
+  const ffp = (path: string, f: FolderSettings) => prints.get(f) ?? (prints.set(f, folderFingerprint(path, f)), prints.get(f)!);
+  const folderPrints = () => Object.entries(get().folders).map(([p, f]) => ffp(p, f));
+  const folderTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let trustTimer: ReturnType<typeof setTimeout> | undefined;
+  const saveTrust = () => {
+    clearTimeout(trustTimer);
+    trustTimer = setTimeout(() => {
+      const { root, trustPrints, settings } = get();
+      if (!root || get().trustEverything) return;
+      get().saveSettings({ trust: { ...settings.trust, [root]: { prints: [...trustPrints].slice(-20000) } } }).catch(() => {});
+    }, 500);
+  };
+  /** Records `next` as trusted, dropping `prev`'s print unless something else still has it. */
+  const addTrust = (next: string[], prev: string[] = []) => {
+    const s = new Set(get().trustPrints);
+    const inUse = new Set([...Object.values(get().items).map(fp), ...get().envs.map(efp), ...folderPrints()]);
+    for (const p of prev) if (!next.includes(p) && !inUse.has(p)) s.delete(p);
+    next.forEach((p) => s.add(p));
+    set({ trustPrints: s });
+    saveTrust();
+  };
+
   const persist = (item: Item) =>
     fs
       .write(item.path, serialize(item))
@@ -190,6 +271,10 @@ export const useStore = create<State>((set, get) => {
 
   return {
     root: null,
+    folders: {},
+    trustPrints: new Set(),
+    trustAsked: true,
+    trustEverything: false,
     dirs: [],
     items: {},
     envs: [],
@@ -227,6 +312,7 @@ export const useStore = create<State>((set, get) => {
     async openWorkspace(path) {
       const tree = await fs.open(path);
       const items: Record<string, Item> = {};
+      const folders: Record<string, FolderSettings> = {};
       const envs: Environment[] = [];
       const secrets: Record<string, KV[]> = {};
       for (const f of tree.files) {
@@ -236,7 +322,10 @@ export const useStore = create<State>((set, get) => {
         } catch {
           continue;
         }
-        if (f.path.startsWith(`${COLLECTIONS}/`) && json?.kind && json.kind in defaults) {
+        if (f.path.startsWith(`${COLLECTIONS}/`) && f.path.endsWith(`/${FOLDER_FILE}`) && json?.kind === "folder") {
+          const { forge: _v, kind: _k, ...rest } = json;
+          folders[dirname(f.path)] = { ...emptyFolder(), ...rest };
+        } else if (f.path.startsWith(`${COLLECTIONS}/`) && json?.kind && json.kind in defaults) {
           const { forge: _v, ...rest } = json;
           items[f.path] = { ...defaults[json.kind as ItemKind](), ...rest, path: f.path } as Item;
         } else if (f.path.startsWith(`${ENVIRONMENTS}/`) && Array.isArray(json?.vars)) {
@@ -250,8 +339,13 @@ export const useStore = create<State>((set, get) => {
       const prev = get();
       // Saved keys may use the path as typed (e.g. /tmp/x) rather than the resolved one (/private/tmp/x).
       const activeEnv = prev.settings.activeEnv?.[tree.root] || prev.settings.activeEnv?.[path] || null;
+      const record = prev.settings.trust?.[tree.root];
       set({
         root: tree.root,
+        folders,
+        trustPrints: new Set(record?.prints ?? []),
+        // A workspace you just created is yours; anything else is asked about once.
+        trustAsked: !!record || isNew || prev.trustEverything,
         items,
         dirs,
         envs: envs.sort((a, b) => a.name.localeCompare(b.name)),
@@ -262,6 +356,7 @@ export const useStore = create<State>((set, get) => {
       if (prev.settings.lastWorkspace !== tree.root) await get().saveSettings({ lastWorkspace: tree.root });
       await fs.ensureGitignore(GITIGNORE).catch((e) => get().notify(`Could not update .gitignore: ${e}`, "error"));
       if (isNew) {
+        saveTrust();
         await fs.mkdir(`${COLLECTIONS}/My Collection`);
         await get().createEnv("Local", [{ key: "baseUrl", value: "http://localhost:3000", enabled: true }]);
         await get().reload();
@@ -285,20 +380,25 @@ export const useStore = create<State>((set, get) => {
       setTimeout(() => get().toast?.text === text && set({ toast: null }), kind === "error" ? 6000 : 2500);
     },
 
-    async createItem(folder, kind, name, data) {
+    async createItem(folder, kind, name, data, opts = {}) {
       const path = uniquePath(folder, name);
       const item = { ...(data ?? defaults[kind]()), name, path } as Item;
       set((s) => ({ items: { ...s.items, [path]: item } }));
+      if (opts.trusted !== false) addTrust([fp(item)]);
       await persist(item);
       get().openTab(path);
       return path;
     },
 
-    updateItem(path, patch) {
+    updateItem(path, patch, opts = {}) {
       const cur = get().items[path];
       if (!cur) return;
       const next = { ...cur, ...patch } as Item;
       set((s) => ({ items: { ...s.items, [path]: next }, saving: { ...s.saving, [path]: true } }));
+      // Changing what a request does means you've looked at it. Names and descriptions aren't
+      // part of the fingerprint, so an AI-written description trusts nothing. (After the set, so
+      // the superseded print can be dropped.)
+      if (fp(next) !== fp(cur) && opts.trusted !== false) addTrust([fp(next)], [fp(cur)]);
       clearTimeout(timers.get(path));
       timers.set(path, window.setTimeout(() => {
         const it = get().items[path];
@@ -358,20 +458,80 @@ export const useStore = create<State>((set, get) => {
       await get().reload();
     },
 
-    async saveEnv(env) {
+    async saveEnv(env, opts = {}) {
       const prev = get().envs.find((e) => e.path === env.path);
       set((s) => ({ envs: s.envs.map((e) => (e.path === env.path ? env : e)) }));
+      if (opts.trust) addTrust([efp(env)], prev ? [efp(prev)] : []);
       await fs.write(env.path, JSON.stringify({ name: env.name, vars: env.vars }, null, 2) + "\n");
       if (env.secrets.length || prev?.secrets.length)
         await fs.write(secretsPath(env.path), JSON.stringify({ name: env.name, vars: env.secrets }, null, 2) + "\n");
     },
 
-    async createEnv(name, vars = [], secrets = []) {
+    async createEnv(name, vars = [], secrets = [], opts = {}) {
       const env: Environment = { name, vars, secrets, path: `${ENVIRONMENTS}/${slug(name)}.json` };
+      if (opts.trusted !== false) addTrust([efp(env)]);
       if (get().envs.some((e) => e.path === env.path)) throw new Error(`Environment ${name} exists`);
       set((s) => ({ envs: [...s.envs, env].sort((a, b) => a.name.localeCompare(b.name)) }));
       await get().saveEnv(env);
       if (!get().activeEnv) get().setActiveEnv(env.path);
+    },
+
+    isTrusted(item) {
+      const { trustEverything, trustPrints, isFolderTrusted, folderChain } = get();
+      return trustEverything || (trustPrints.has(fp(item)) && folderChain(item.path).every(isFolderTrusted));
+    },
+
+    isFolderTrusted(path) {
+      const f = get().folders[path];
+      return !f || get().trustEverything || get().trustPrints.has(ffp(path, f));
+    },
+
+    folderChain(path) {
+      // collections/Shop/Users/list.json → collections/Shop, collections/Shop/Users
+      const parts = path.split("/").slice(1, -1);
+      return parts.map((_, i) => [COLLECTIONS, ...parts.slice(0, i + 1)].join("/"));
+    },
+
+    varsFor(path) {
+      const out: Record<string, string> = {};
+      for (const f of get().folderChain(path)) for (const v of get().folders[f]?.vars ?? []) if (v.enabled && v.key) out[v.key] = v.value;
+      return { ...out, ...get().vars() };
+    },
+
+    async saveFolder(path, settings, opts = {}) {
+      const prev = get().folders[path];
+      set((s) => ({ folders: { ...s.folders, [path]: settings } }));
+      if (opts.trusted !== false) addTrust([ffp(path, settings)], prev ? [ffp(path, prev)] : []);
+      clearTimeout(folderTimers.get(path));
+      // Typing in the folder editor saves once it pauses, like requests.
+      await new Promise<void>((resolve) =>
+        folderTimers.set(
+          path,
+          setTimeout(() => {
+            const cur = get().folders[path];
+            if (cur) fs.write(`${path}/${FOLDER_FILE}`, JSON.stringify({ forge: 1, kind: "folder", ...cur }, null, 2) + "\n").catch((e) => get().notify(`Save failed: ${e}`, "error"));
+            resolve();
+          }, opts.trusted === false ? 0 : 300),
+        ),
+      );
+    },
+
+    isEnvTrusted(env) {
+      return get().trustEverything || get().trustPrints.has(efp(env));
+    },
+
+    trust(paths, envPaths = []) {
+      const under = (p: string) => paths.some((f) => p === f || p.startsWith(`${f}/`));
+      // A request is only as trusted as the folders above it, so trusting it trusts their settings.
+      const above = new Set(paths.flatMap((p) => get().folderChain(p.endsWith(".json") ? p : `${p}/x`)));
+      const folders = Object.entries(get().folders).filter(([p]) => under(p) || above.has(p));
+      addTrust([...Object.values(get().items).filter((i) => under(i.path)).map(fp), ...folders.map(([p, f]) => ffp(p, f)), ...get().envs.filter((e) => envPaths.includes(e.path)).map(efp)]);
+    },
+
+    decideWorkspaceTrust(trusted) {
+      set({ trustAsked: true });
+      if (trusted) addTrust([...Object.values(get().items).map(fp), ...get().envs.map(efp), ...folderPrints()]);
+      else saveTrust();
     },
 
     async newEnv() {
@@ -472,6 +632,17 @@ export const useStore = create<State>((set, get) => {
         const tabs = s.tabs.filter((t) => t !== id);
         const active = s.active === id ? (tabs[Math.min(i, tabs.length - 1)] ?? null) : s.active;
         return { tabs, active };
+      });
+    },
+
+    closeTabs(ids) {
+      set((s) => {
+        const gone = new Set(ids);
+        const tabs = s.tabs.filter((t) => !gone.has(t));
+        const kept = s.active && !gone.has(s.active);
+        // Otherwise the nearest tab left of the old active one.
+        const left = s.tabs.slice(0, Math.max(0, s.tabs.indexOf(s.active ?? ""))).filter((t) => !gone.has(t));
+        return { tabs, active: kept ? s.active : (left[left.length - 1] ?? tabs[0] ?? null) };
       });
     },
 

@@ -1,6 +1,9 @@
+mod cookies;
 mod http;
 mod mcp;
+mod mock;
 mod oauth;
+mod radar;
 mod server;
 mod sse;
 mod store;
@@ -31,11 +34,18 @@ pub fn run() {
         .manage(server::ServerState::default())
         .manage(store::Workspace::default())
         .manage(oauth::OAuthListeners::default())
+        .manage(radar::RadarManager::default())
+        .manage(mock::MockManager::default())
         .invoke_handler(tauri::generate_handler![
             http::http_send,
             http::http_stream,
             http::http_cancel,
             http::http_reset_cookies,
+            cookies::cookies_list,
+            cookies::cookies_set,
+            cookies::cookies_delete,
+            cookies::cookies_export,
+            cookies::cookies_import,
             oauth::oauth_listen,
             oauth::oauth_wait,
             oauth::oauth_cancel,
@@ -46,6 +56,15 @@ pub fn run() {
             ws::ws_connect,
             ws::ws_send,
             ws::ws_close,
+            mock::mock_start,
+            mock::mock_update,
+            mock::mock_stop,
+            mock::mock_list,
+            radar::radar_browsers,
+            radar::radar_start,
+            radar::radar_send,
+            radar::radar_stop,
+            radar::radar_clear_profiles,
             store::workspace_open,
             store::import_read,
             store::workspace_write_bytes,
@@ -60,7 +79,14 @@ pub fn run() {
             store::workspace_ensure_gitignore,
             store::settings_read,
             store::settings_write,
+            store::appdata_read,
+            store::appdata_write,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                radar::shutdown(app);
+            }
+        });
 }

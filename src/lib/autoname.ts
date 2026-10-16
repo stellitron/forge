@@ -8,7 +8,7 @@ import type { Item } from "./types";
  * first successful response. Stops as soon as the user renames the item themselves.
  */
 
-const DEFAULT = /^(new (request|mcp server|a2a agent|websocket|web check|agent test|item)|untitled)( copy)?( \d+)?$/i;
+const DEFAULT = /^(new (request|mcp server|a2a agent|websocket|web check|website radar|agent test|item)|untitled)( copy)?( \d+)?$/i;
 
 const VERBS: Record<string, string> = { GET: "Get", POST: "Create", PUT: "Replace", PATCH: "Update", DELETE: "Delete", HEAD: "Check", OPTIONS: "Options for" };
 const ACTIONS = /^(search|login|logout|signin|signup|register|refresh|verify|validate|reset|confirm|cancel|approve|reject|publish|archive|restore|export|import|upload|download|sync|health|status|ping|me|count|stats|summary|token|callback|webhook|batch|bulk)$/i;
@@ -86,6 +86,8 @@ export function suggestName(item: Item): string | null {
       return item.url && hostOf(item.url) ? `${hostOf(item.url)} socket` : null;
     case "web":
       return item.url && hostOf(item.url) ? `${hostOf(item.url)} check` : null;
+    case "radar":
+      return item.url && hostOf(item.url) ? `${hostOf(item.url)} radar` : null;
     default:
       return null;
   }

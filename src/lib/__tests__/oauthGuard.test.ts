@@ -21,6 +21,8 @@ function setup(items: Item[]) {
     envs: [{ name: "Dev", path: "environments/dev.json", vars: [], secrets: [{ key: "clientSecret", value: SECRET, enabled: true }] }],
     activeEnv: "environments/dev.json",
     sessionVars: {},
+    // These are your own requests in a workspace you trust.
+    trustEverything: true,
     responses: {},
   } as any);
 }

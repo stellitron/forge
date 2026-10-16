@@ -159,7 +159,7 @@ h3 { font-size: 12px; margin: 0; font-weight: 600; text-transform: uppercase; le
 .m-GET { color: var(--get); } .m-POST { color: var(--post); } .m-PUT { color: var(--put); }
 .m-PATCH { color: var(--patch); } .m-DELETE { color: var(--delete); } .m-HEAD, .m-OPTIONS { color: var(--fg-3); }
 .kind { font: 700 9px/1 var(--mono); width: 38px; flex-shrink: 0; letter-spacing: 0.02em; }
-.k-mcp { color: #e879f9; } .k-a2a { color: #22d3ee; } .k-ws { color: #fb923c; } .k-web { color: #a3e635; }
+.k-mcp { color: #e879f9; } .k-a2a { color: #22d3ee; } .k-ws { color: #fb923c; } .k-web { color: #a3e635; } .k-radar { color: #34d399; }
 .k-agent { color: var(--accent-2); } .k-gql { color: #f472b6; }
 
 /* ---------- tabs ---------- */

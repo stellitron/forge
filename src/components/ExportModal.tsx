@@ -30,6 +30,7 @@ export default function ExportModal({ root, onClose }: { root: string; onClose: 
     // Only shared values resolve a {{baseUrl}} server; secrets are never exported.
     vars: Object.fromEntries((env?.vars ?? []).filter((v) => v.enabled).map((v) => [v.key, v.value])),
     responses: Object.fromEntries(Object.entries(st.responses).map(([k, r]) => [k, r.res])),
+    folders: st.folders,
   };
   const { http, skipped } = exportSummary(input);
   const f = FORMATS.find((x) => x.id === format)!;

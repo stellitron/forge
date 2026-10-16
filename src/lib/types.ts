@@ -27,6 +27,8 @@ export interface OAuth2Auth {
 export type JwtAlgorithm = "HS256" | "HS384" | "HS512" | "RS256" | "RS384" | "RS512" | "ES256" | "ES384";
 
 export type Auth =
+  /** Use the nearest folder's auth (or none if no folder sets one). */
+  | { type: "inherit" }
   | { type: "none" }
   | { type: "bearer"; token: string }
   | { type: "basic"; username: string; password: string }
@@ -95,6 +97,20 @@ export interface HttpItem {
   settings: { timeoutMs: number; followRedirects: boolean; insecure: boolean; clientCert?: ClientCert };
   /** Markdown shown in generated API docs (the Docs tab). */
   description?: string;
+  /** Saved responses: shown in docs, used as context by AI, and served by the mock server. The first is the default. */
+  examples?: ResponseExample[];
+  /** JavaScript run before sending (Postman's pm API, Bruno's bru/req). */
+  preScript?: string;
+  /** JavaScript run after the response arrives, for tests and saving values. */
+  postScript?: string;
+}
+
+/** A response saved with a request, committed with it (secret values are stored as {{placeholders}}). */
+export interface ResponseExample {
+  name: string;
+  status: number;
+  headers: KV[];
+  body: string;
 }
 
 export interface McpItem {
@@ -127,6 +143,19 @@ export interface WebItem {
   maxLinks: number;
 }
 
+/** Captures the APIs a web app calls while you (or the agent) use it in a separate browser. */
+export interface RadarItem {
+  kind: "radar";
+  url: string;
+  /** Browser program path; empty picks the first Chrome-family browser found. */
+  browser: string;
+  /** What the exploring agent should focus on. */
+  goal: string;
+  maxSteps: number;
+  /** Lets the agent's clicks send POST/PUT/PATCH/DELETE; otherwise they're blocked but recorded. */
+  allowWrites: boolean;
+}
+
 export interface AgentItem {
   kind: "agent";
   goal: string;
@@ -138,8 +167,27 @@ export interface AgentItem {
   approveMutations: boolean;
 }
 
-export type ItemData = HttpItem | McpItem | A2AItem | WsItem | WebItem | AgentItem;
+export type ItemData = HttpItem | McpItem | A2AItem | WsItem | WebItem | RadarItem | AgentItem;
 export type ItemKind = ItemData["kind"];
+
+/**
+ * Settings a folder passes down to everything inside it, kept in `<folder>/_folder.json`. A
+ * collection is the top-level folder, so its settings are the collection's.
+ */
+export interface FolderSettings {
+  /** "inherit" (the default) passes the parent folder's auth through. */
+  auth: Auth;
+  /** Added to every request; a request's own header of the same name wins. */
+  headers: KV[];
+  /** Collection and folder variables. The active environment overrides them. */
+  vars: KV[];
+  /** Run before each request's own scripts, outer folders first. */
+  preScript?: string;
+  postScript?: string;
+  description?: string;
+}
+
+export const emptyFolder = (): FolderSettings => ({ auth: { type: "inherit" }, headers: [], vars: [] });
 
 /** A saved item. `path` is relative to the workspace root and doubles as its id. */
 export type Item = ItemData & { name: string; path: string };
@@ -184,7 +232,8 @@ export const defaults: { [K in ItemKind]: () => Extract<ItemData, { kind: K }> }
     url: "",
     params: [],
     headers: [],
-    auth: { type: "none" },
+    // New requests use their folder's auth; with none set anywhere, that's no auth.
+    auth: { type: "inherit" },
     bodyMode: "none",
     body: "",
     form: [],
@@ -198,6 +247,7 @@ export const defaults: { [K in ItemKind]: () => Extract<ItemData, { kind: K }> }
   a2a: () => ({ kind: "a2a", url: "", headers: [] }),
   ws: () => ({ kind: "ws", url: "", headers: [], message: "" }),
   web: () => ({ kind: "web", url: "", maxLinks: 50 }),
+  radar: () => ({ kind: "radar", url: "", browser: "", goal: "", maxSteps: 40, allowWrites: false }),
   agent: () => ({
     kind: "agent",
     goal: "",
@@ -216,5 +266,6 @@ export const kindLabel: Record<ItemKind, string> = {
   a2a: "A2A agent",
   ws: "WebSocket",
   web: "Web check",
+  radar: "Website radar",
   agent: "Agent test",
 };

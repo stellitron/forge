@@ -67,6 +67,7 @@ Go to **Settings, AI model**, pick a provider and paste your key. This turns on 
 
 | Shortcut | Action |
 | --- | --- |
+| <kbd>⌘</kbd> <kbd>K</kbd> | Quick open: jump to any request, folder, environment, recent send or action |
 | <kbd>⌘</kbd> <kbd>↵</kbd> | Send the request |
 | <kbd>⌘</kbd> <kbd>L</kbd> | Open Ask |
 | <kbd>⌘</kbd> <kbd>I</kbd> | Import |
@@ -80,6 +81,6 @@ Use <kbd>Ctrl</kbd> instead of <kbd>⌘</kbd> on Windows and Linux.
 
 **Requests fail on a company network.** Forge uses your system proxy settings and trusted certificates. If your company inspects TLS traffic, make sure its root certificate is installed in the system store. For a self-signed test server, turn off certificate checks in the request's **Settings** tab.
 
-**macOS says Forge can't be opened.** Download it again from the official site or releases page. Official builds are signed and notarized by Stellitron.
+**macOS says Forge can't be opened, or Windows shows "Windows protected your PC".** Installers that aren't yet signed with Apple or Microsoft certificates, including v0.1.0, get this warning. Download Forge only from the official site or the [releases page](https://github.com/stellitron/forge/releases). Then, on macOS, open **System Settings, Privacy & Security** and click **Open Anyway**. On Windows, click **More info, Run anyway**. To check a download is genuine, compare it with the release's `SHA256SUMS`, or run `gh attestation verify <file> -R stellitron/forge`.
 
 **Something else.** Check the console (<kbd>⌘</kbd> <kbd>J</kbd>) for the full request and error, then [open an issue](https://github.com/stellitron/forge/issues/new/choose).

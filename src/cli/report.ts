@@ -28,6 +28,7 @@ export function line(r: RequestResult, useColor: boolean, iterations: number): s
   const out = [`  ${mark} ${iter}${r.method.padEnd(6)} ${r.path}  ${status}${r.timeMs !== undefined ? c.dim(`  ${r.timeMs} ms`) : ""}`];
   if (r.error) out.push(`      ${c.red(r.error)}`);
   for (const t of r.tests.filter((x) => !x.pass)) out.push(`      ${c.red("✗")} ${t.label} ${c.dim(`(got ${t.actual})`)}`);
+  for (const l of r.logs ?? []) out.push(c.dim(`      › ${l}`));
   return out.join("\n");
 }
 

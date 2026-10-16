@@ -10,11 +10,24 @@ import type { Auth, HttpItem, HttpResponse, KV } from "./types";
  * Sends a saved request with its auth applied: OAuth tokens are fetched or refreshed first, AWS,
  * Hawk and JWT are signed against the final request, and Digest answers the server's challenge.
  */
-export async function sendItem(item: HttpItem, requestId: string, source: string, opts: { interactive: boolean }): Promise<{ req: RawRequest; res: HttpResponse }> {
+export async function sendItem(
+  item: HttpItem,
+  requestId: string,
+  source: string,
+  opts: { interactive: boolean; rawBody?: string; vars?: () => Record<string, string> },
+): Promise<{ req: RawRequest; res: HttpResponse }> {
+  // Collection and folder variables come in through `vars`; the environment's otherwise.
+  const getVars = opts.vars ?? (() => useStore.getState().vars());
   const auth = item.auth;
   if (auth.type === "oauth2") await ensureOAuthToken(auth, opts);
-  const vars = useStore.getState().vars();
-  const req = await signRequest(buildRequest(item, vars), auth, vars);
+  // rawBody replaces the body as is, without {{variables}} filled in (used for AI turns, whose
+  // text must keep placeholders rather than secret values).
+  const build = (vars: Record<string, string>): RawRequest => {
+    const r = buildRequest(item, vars);
+    return opts.rawBody === undefined ? r : { ...r, body: { type: "raw", content: opts.rawBody } };
+  };
+  const vars = getVars();
+  const req = await signRequest(build(vars), auth, vars);
   if (!req.url) throw new Error("Enter a URL");
   let res = await http.send(requestId, req, source);
 
@@ -30,7 +43,7 @@ export async function sendItem(item: HttpItem, requestId: string, source: string
   if (res.status === 401 && auth.type === "oauth2" && tokenState(auth).refresh) {
     try {
       await refreshToken(auth);
-      const again = buildRequest(item, useStore.getState().vars());
+      const again = build(getVars());
       res = await http.send(requestId, again, source);
       return { req: again, res };
     } catch {

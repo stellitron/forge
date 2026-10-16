@@ -1,7 +1,9 @@
+import { STATUS_TEXT, contentTypeOf } from "./examples";
+import { effectiveItem, folderVars } from "./inherit";
 import { stringify as toYaml } from "yaml";
 import { displayUrl, pathVarNames, splitUrl } from "./urlParams";
 import { redact, redactText } from "./redact";
-import type { Assertion, Auth, Environment, HttpItem, HttpResponse, Item, KV } from "./types";
+import type { Assertion, Auth, Environment, FolderSettings, HttpItem, HttpResponse, Item, KV } from "./types";
 
 /**
  * Exports a collection or folder for other tools: Postman v2.1 (with tests turned into
@@ -18,6 +20,8 @@ export interface ExportInput {
   vars?: Record<string, string>;
   /** Last responses, used as OpenAPI examples. */
   responses?: Record<string, HttpResponse | undefined>;
+  /** Folder settings (auth, headers, variables, scripts) by folder path. */
+  folders?: Record<string, FolderSettings>;
 }
 
 const under = (root: string, path: string) => path.startsWith(`${root}/`);
@@ -36,6 +40,9 @@ const pv = (key: string, value: string | boolean | number) => ({ key, value, typ
 
 function postmanAuth(a: Auth): Record<string, unknown> | undefined {
   switch (a.type) {
+    // No auth key means "inherit from parent" in Postman.
+    case "inherit":
+      return undefined;
     case "none":
       return { type: "noauth" };
     case "bearer":
@@ -140,13 +147,28 @@ export function postmanTests(assertions: Assertion[], extractions: HttpItem["ext
 }
 
 export function toPostman(i: ExportInput): string {
-  type Folder = { name: string; item: unknown[] };
-  const top: Folder = { name: i.name, item: [] };
+  type Folder = { name: string; item: unknown[]; auth?: unknown; event?: unknown[]; variable?: unknown[] };
+  /** A folder's settings in Postman's shape: auth, scripts as events, and variables. */
+  const settingsOf = (path: string) => {
+    const f = i.folders?.[path];
+    if (!f) return {};
+    const lines = (s?: string) => (s?.trim() ? s.trim().split("\n") : []);
+    const event = [
+      ...(lines(f.preScript).length ? [{ listen: "prerequest", script: { type: "text/javascript", exec: lines(f.preScript) } }] : []),
+      ...(lines(f.postScript).length ? [{ listen: "test", script: { type: "text/javascript", exec: lines(f.postScript) } }] : []),
+    ];
+    return {
+      ...(postmanAuth(f.auth) ? { auth: postmanAuth(f.auth) } : {}),
+      ...(event.length ? { event } : {}),
+      ...(f.vars.length ? { variable: f.vars.filter((v) => v.key).map((v) => ({ key: v.key, value: v.value, disabled: !v.enabled })) } : {}),
+    };
+  };
+  const top: Folder = { name: i.name, item: [], ...settingsOf(i.root) };
   const folders = new Map<string, Folder>([["", top]]);
   const folderFor = (relDir: string): Folder => {
     if (folders.has(relDir)) return folders.get(relDir)!;
     const parent = folderFor(relDir.includes("/") ? relDir.slice(0, relDir.lastIndexOf("/")) : "");
-    const f: Folder = { name: relDir.split("/").pop()!, item: [] };
+    const f: Folder = { name: relDir.split("/").pop()!, item: [], ...settingsOf(`${i.root}/${relDir}`) };
     parent.item.push(f);
     folders.set(relDir, f);
     return f;
@@ -156,7 +178,9 @@ export function toPostman(i: ExportInput): string {
     const dir = r.includes("/") ? r.slice(0, r.lastIndexOf("/")) : "";
     const raw = displayUrl(d.url, d.params);
     const { base } = splitUrl(raw);
-    const exec = postmanTests(d.assertions, d.extractions);
+    // Assertions become generated tests, followed by the request's own post-response script.
+    const exec = [...postmanTests(d.assertions, d.extractions), ...(d.postScript?.trim() ? d.postScript.trim().split("\n") : [])];
+    const pre = d.preScript?.trim() ? d.preScript.trim().split("\n") : [];
     folderFor(dir).item.push({
       name: d.name,
       request: {
@@ -171,10 +195,31 @@ export function toPostman(i: ExportInput): string {
         auth: postmanAuth(d.auth),
         ...(postmanBody(d) ? { body: postmanBody(d) } : {}),
       },
-      ...(exec.length ? { event: [{ listen: "test", script: { type: "text/javascript", exec } }] } : {}),
+      ...(d.examples?.length
+        ? {
+            response: d.examples.map((ex) => ({
+              name: ex.name,
+              originalRequest: { method: d.method, header: [], url: { raw } },
+              code: ex.status,
+              status: STATUS_TEXT[ex.status] ?? "",
+              header: ex.headers.map((h) => ({ key: h.key, value: h.value })),
+              body: ex.body,
+              _postman_previewlanguage: /json/.test(contentTypeOf(ex)) ? "json" : "text",
+            })),
+          }
+        : {}),
+      ...(exec.length || pre.length
+        ? {
+            event: [
+              ...(pre.length ? [{ listen: "prerequest", script: { type: "text/javascript", exec: pre } }] : []),
+              ...(exec.length ? [{ listen: "test", script: { type: "text/javascript", exec } }] : []),
+            ],
+          }
+        : {}),
     });
   }
-  return JSON.stringify({ info: { name: i.name, schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json", description: "Exported from Forge (https://forge.stellitron.com)" }, item: top.item }, null, 2);
+  const { item: _items, name: _n, ...collection } = top;
+  return JSON.stringify({ info: { name: i.name, schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json", description: "Exported from Forge (https://forge.stellitron.com)" }, ...collection, item: top.item }, null, 2);
 }
 
 /** Postman environment. Secret values are left empty unless asked for, so a shared file can't leak them. */
@@ -248,14 +293,30 @@ function securityScheme(a: Auth): [string, Record<string, unknown>] | null {
   }
 }
 
+function openApiResponses(examples: NonNullable<HttpItem["examples"]>): Record<string, unknown> {
+  const out: Record<string, { description: string; content?: Record<string, { examples: Record<string, { summary: string; value: unknown }> }> }> = {};
+  for (const ex of examples) {
+    const ctype = contentTypeOf(ex).split(";")[0] || "text/plain";
+    const r = (out[String(ex.status)] ??= { description: STATUS_TEXT[ex.status] ?? "Response" });
+    if (!ex.body) continue;
+    const parsed = /json/.test(ctype) ? example(ex.body) : undefined;
+    const value = typeof parsed === "object" && parsed !== null ? redact(parsed) : redactText(ex.body.slice(0, 2000));
+    const media = ((r.content ??= {})[ctype] ??= { examples: {} });
+    media.examples[ex.name.replace(/[^\w.-]+/g, "_") || "example"] = { summary: ex.name, value };
+  }
+  return out;
+}
+
 export function toOpenApi(i: ExportInput, format: "yaml" | "json"): string {
   const paths: Record<string, Record<string, unknown>> = {};
   const servers = new Set<string>();
   const schemes: Record<string, unknown> = {};
   const ids = new Set<string>();
 
-  for (const d of httpItems(i).sort((a, b) => a.path.localeCompare(b.path))) {
-    const loc = openApiLocation(d.url, i.vars);
+  for (const own of httpItems(i).sort((a, b) => a.path.localeCompare(b.path))) {
+    // The spec describes what's actually sent: folder headers and inherited auth included.
+    const d = effectiveItem(own, i.folders ?? {});
+    const loc = openApiLocation(d.url, { ...folderVars(d.path, i.folders ?? {}), ...i.vars });
     if (loc.server) servers.add(loc.server);
     const r = rel(i.root, d.path);
     const tag = r.includes("/") ? r.slice(0, r.lastIndexOf("/")) : "";
@@ -290,7 +351,9 @@ export function toOpenApi(i: ExportInput, format: "yaml" | "json"): string {
     // Examples leave Forge in the spec: secrets hidden and personal data replaced with sample values.
     const parsed = last && ctype?.includes("json") ? example(last.body) : undefined;
     const sampleExample = last ? (typeof parsed === "object" && parsed !== null ? redact(parsed) : redactText(last.body.slice(0, 2000))) : undefined;
-    const responses = { [status]: { description: last?.statusText || "Response", ...(last && ctype && !last.bodyBase64 ? { content: { [ctype]: { example: sampleExample } } } : {}) } };
+    const fromLast = { [status]: { description: last?.statusText || "Response", ...(last && ctype && !last.bodyBase64 ? { content: { [ctype]: { example: sampleExample } } } : {}) } };
+    // Saved examples, grouped by status, take precedence over the last run (same redaction).
+    const responses = d.examples?.length ? openApiResponses(d.examples) : fromLast;
 
     const sec = securityScheme(d.auth);
     if (sec) schemes[sec[0]] = sec[1];

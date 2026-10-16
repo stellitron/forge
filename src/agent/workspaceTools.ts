@@ -10,6 +10,8 @@ import { analyze, cell, describeShape, query as runQuery, type Query } from "../
 import type { ToolSpec } from "./llm";
 import { aiCreated, allow, checkEgress, type Outgoing, oauthOutgoing } from "./egress";
 import { buildRequest } from "../lib/request";
+import { moreTools } from "./moreTools";
+import { effectiveItem } from "../lib/inherit";
 
 /**
  * Tools over the open workspace. The in-app Ask chat and external clients (MCP, A2A) share
@@ -70,16 +72,20 @@ async function guardEgress(ctx: ToolCtx, method: string, raw: Outgoing, sent: Ou
   return true;
 }
 
-/** Saved requests the user wrote are trusted; ones the AI saved this session get the same check as ad-hoc ones. */
-async function guardSaved(ctx: ToolCtx, item: Item & HttpItem): Promise<boolean> {
-  if (!aiCreated.has(item.path)) return false;
-  const vars = st().vars();
-  const req = buildRequest(item, vars);
-  const rawReq = buildRequest(item, {});
+/**
+ * Requests you wrote or trusted run as they are. Ones the AI saved or edited, imports and anything
+ * changed outside Forge get the same check as ad-hoc ones.
+ */
+export async function guardSaved(ctx: ToolCtx, item: Item & HttpItem): Promise<boolean> {
+  if (!aiCreated.has(item.path) && st().isTrusted(item)) return false;
+  const vars = st().varsFor(item.path);
+  const sent = effectiveItem(item);
+  const req = buildRequest(sent, vars);
+  const rawReq = buildRequest(sent, {});
   const body = (b: RawRequest["body"]) => (b?.type === "raw" ? b.content : b ? JSON.stringify(b) : undefined);
   const asked = await guardEgress(ctx, item.method, { url: rawReq.url, headers: rawReq.headers, body: body(rawReq.body) }, { url: req.url, headers: req.headers, body: body(req.body) });
   // OAuth fetches its token from another host first, sending the client secret or a password.
-  const token = oauthOutgoing(item, vars);
+  const token = oauthOutgoing(sent, vars);
   const askedToken = token ? await guardEgress(ctx, "OAuth token request", token.raw, token.sent) : false;
   return asked || askedToken;
 }
@@ -132,7 +138,7 @@ export const WORKSPACE_TOOLS: WorkspaceTool[] = [
     readOnly: true,
     spec: {
       name: "get_request",
-      description: "Read a saved item's full definition (method, URL, params, headers, auth type, body, assertions). {{name}} placeholders are environment variables.",
+      description: "Read a saved item's full definition (method, URL, params, headers, auth type, body, assertions, saved response examples). {{name}} placeholders are environment variables.",
       schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
     },
     async run({ path }) {
@@ -144,6 +150,8 @@ export const WORKSPACE_TOOLS: WorkspaceTool[] = [
       if (copy.headers) copy.headers = copy.headers.map((h: any) => (/\{\{/.test(h.value) ? h : redactHeaders([h])[0]));
       if (copy.auth?.token && !/\{\{/.test(copy.auth.token)) copy.auth.token = "(set, hidden)";
       if (copy.auth?.password && !/\{\{/.test(copy.auth.password)) copy.auth.password = "(set, hidden)";
+      // Saved examples show what the endpoint returns; long ones are shortened so they don't crowd out the rest.
+      if (copy.examples) copy.examples = copy.examples.map((e: any) => ({ ...e, body: e.body.length > 2000 ? `${e.body.slice(0, 2000)}…` : e.body }));
       return clip(JSON.stringify(copy, null, 1), 20000);
     },
   },
@@ -306,7 +314,8 @@ export const WORKSPACE_TOOLS: WorkspaceTool[] = [
         d.body = typeof inp.body === "string" ? inp.body : JSON.stringify(inp.body, null, 2);
       }
       await ensureFolder(folder);
-      const path = await st().createItem(folder, "http", String(inp.name), d);
+      // Saved by the AI, not you: it doesn't vouch for its host, now or after a restart.
+      const path = await st().createItem(folder, "http", String(inp.name), d, { trusted: false });
       aiCreated.add(path);
       return `Saved as ${rel(path)}`;
     },
@@ -443,6 +452,9 @@ export const WORKSPACE_TOOLS: WorkspaceTool[] = [
     },
   },
 ];
+
+// Editing, settings, examples, mocks, history, imports and GraphQL; same approvals and trust rules.
+WORKSPACE_TOOLS.push(...moreTools({ httpItem, ensureFolder, guardEgress, guardSaved, rel, clip }));
 
 export async function runTool(name: string, input: any, ctx: ToolCtx): Promise<string> {
   const tool = WORKSPACE_TOOLS.find((t) => t.spec.name === name);

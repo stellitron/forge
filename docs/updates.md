@@ -18,7 +18,7 @@ The check downloads a small `latest.json` file from GitHub releases. It contains
 3. The app contains the matching public key (`plugins.updater.pubkey` in `src-tauri/tauri.conf.json`).
 4. Before installing, Forge verifies the signature. A bundle that wasn't signed with Stellitron's key is rejected.
 
-On macOS and Windows, installers are also signed with platform certificates so the operating system trusts them.
+Installers can also be signed with Apple and Microsoft certificates, so the operating system trusts them on first install. That signing is being set up: v0.1.0 isn't signed this way, and the release notes say which installers of a release are. See [Releasing](releasing.md#signing-setup) for the current setup. Every release is scanned on VirusTotal (the results are in the release notes and on the website), and includes `SHA256SUMS` and GitHub build provenance, so you can check that a download was built by Forge's release workflow from this repository.
 
 ## For maintainers
 

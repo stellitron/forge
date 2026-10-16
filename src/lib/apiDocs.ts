@@ -1,3 +1,5 @@
+import { effectiveItem, folderVars } from "./inherit";
+import { defaultExample, exampleAsResponse } from "./examples";
 import { generate, LANGUAGES, type LangId } from "./codegen";
 import { buildRequest } from "./request";
 import { openApiLocation, type ExportInput } from "./exportCollection";
@@ -136,6 +138,8 @@ const parseJson = (s: string): { ok: true; value: unknown } | { ok: false } => {
 
 function describeAuth(a: Auth): string {
   switch (a.type) {
+    // Callers resolve inherited auth first; unresolved, it means nothing is set.
+    case "inherit":
     case "none":
       return "";
     case "bearer":
@@ -176,10 +180,12 @@ export function buildDocModel(i: ExportInput, opts: DocOptions, now = new Date()
   const ids = new Set<string>();
   const folders = new Map<string, DocEndpoint[]>();
 
-  for (const d of items) {
+  for (const own of items) {
+    // Documented as sent: folder headers and inherited auth, with collection variables for base URLs.
+    const d = effectiveItem(own, i.folders ?? {});
     const r = rel(i.root, d.path);
     const folder = r.includes("/") ? r.slice(0, r.lastIndexOf("/")) : "";
-    const loc = openApiLocation(d.url, i.vars);
+    const loc = openApiLocation(d.url, { ...folderVars(d.path, i.folders ?? {}), ...i.vars });
     if (loc.server) servers.add(loc.server);
     const auth = describeAuth(d.auth);
     if (auth) schemes.add(auth);
@@ -211,7 +217,9 @@ export function buildDocModel(i: ExportInput, opts: DocOptions, now = new Date()
     else if (d.bodyMode === "binary") body = { type: "application/octet-stream", example: "", fields: [] };
 
     let response: DocEndpoint["response"];
-    const res: HttpResponse | undefined = i.responses?.[d.path];
+    // A saved example is curated, so it's preferred over whatever the last run returned.
+    const saved = defaultExample(d.examples);
+    const res: HttpResponse | undefined = saved ? exampleAsResponse(saved) : i.responses?.[d.path];
     if (opts.examples !== "off" && res && !res.bodyBase64) {
       const mode = opts.examples;
       const type = res.headers.find((h) => h.key.toLowerCase() === "content-type")?.value.split(";")[0] ?? "";

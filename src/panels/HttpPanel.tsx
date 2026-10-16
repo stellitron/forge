@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Code2, FolderOpen, Copy, Loader2, Plus, Send, Sparkles, Square, Trash2 } from "lucide-react";
+import { BookmarkPlus, ChevronRight, Code2, Cookie, Copy, FolderOpen, Loader2, Plus, Send, ShieldAlert, Sparkles, Square, Trash2 } from "lucide-react";
 import { writeText } from "../lib/clipboard";
-import { formatBytes, prettyBody, runAssertions, runExtractions } from "../lib/eval";
+import { formatBytes, prettyBody } from "../lib/eval";
+import { executeHttp, type ScriptLog } from "../lib/execute";
+import { logConsole } from "../lib/devconsole";
+import { askApproval } from "../lib/approvals";
+import { useHistory } from "../lib/history";
+import { inheritedHeaders, resolveAuth, scriptChain } from "../lib/inherit";
+import { folderTab } from "./FolderPanel";
+import CompareView from "../components/CompareView";
+import GraphQLEditor from "../components/GraphQLEditor";
+import { openCookies } from "../components/CookiesModal";
+import { STATUS_TEXT, contentTypeOf, exampleFromResponse, uniqueExampleName } from "../lib/examples";
+import { secretValues } from "../agent/egress";
 import { http, uid } from "../lib/ipc";
-import { sendItem } from "../lib/sendItem";
 import { importCurl } from "../lib/importers";
 import { suggestAssertions } from "../lib/suggest";
 import CodeModal from "../components/CodeModal";
@@ -15,13 +25,13 @@ import { mdToHtml } from "../lib/apiDocs";
 import SuggestButton from "../components/SuggestButton";
 import { COMMON_HEADERS, QUICK_HEADERS, autoHeaders, headerValues } from "../lib/httpKnowledge";
 import { composeUrl, displayUrl, hasLiteralPlus, paramsFromUrl, pathVarNames, syncPathVars } from "../lib/urlParams";
-import { useStore } from "../lib/store";
-import type { AssertOp, AssertSource, Assertion, BodyMode, ClientCert, Extraction, HttpItem, Item, KV } from "../lib/types";
+import { basename, useStore, type ResponseState } from "../lib/store";
+import { kv, type AssertOp, type AssertSource, type Assertion, type BodyMode, type ClientCert, type Extraction, type HttpItem, type HttpResponse, type Item, type KV, type ResponseExample } from "../lib/types";
 import { Editor, KvTable, Seg, Split, statusClass, type Lang } from "../components/ui";
 
 export const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-type ReqTab = "params" | "headers" | "auth" | "body" | "tests" | "docs" | "settings";
-type ResTab = "body" | "data" | "headers" | "tests" | "raw";
+type ReqTab = "params" | "headers" | "auth" | "body" | "tests" | "scripts" | "docs" | "settings";
+type ResTab = "body" | "data" | "headers" | "tests" | "compare" | "raw";
 
 /** Sends the item, runs assertions/extractions, and records the result in the store. */
 export async function runHttp(item: Item & HttpItem, source = "request") {
@@ -30,16 +40,29 @@ export async function runHttp(item: Item & HttpItem, source = "request") {
   s.setResponse(item.path, { loading: true, requestId });
   try {
     // A person pressing Send can complete a browser sign-in; runs started by tools or the runner can't.
-    const { res } = await sendItem(item, requestId, source, { interactive: source === "request" });
-    const results = runAssertions(item.assertions, res, useStore.getState().vars());
-    const extracted = runExtractions(item.extractions, res);
-    s.setVars(extracted);
-    s.setResponse(item.path, { res, results, extracted });
+    const confirm = (summary: string) => askApproval(`Script in "${item.name}"`, summary, true);
+    const { req, res, results, extracted, logs } = await executeHttp(item, requestId, source, { interactive: source === "request", confirm });
+    logScripts(item.name, logs);
+    const entry = useHistory.getState().add({ path: item.path, name: item.name, env: envName(), source, req, res, results });
+    s.setResponse(item.path, { res, results, extracted, historyId: entry?.id });
     return { res, results };
   } catch (e) {
-    s.setResponse(item.path, { error: String(e) });
+    logScripts(item.name, (e as { logs?: ScriptLog[] }).logs ?? []);
+    const error = e instanceof Error ? e.message : String(e);
+    s.setResponse(item.path, { error });
+    useHistory.getState().add({ path: item.path, name: item.name, env: envName(), source, req: { method: item.method, url: item.url, headers: item.headers.filter((h) => h.enabled) }, error });
     return { error: String(e) };
   }
+}
+
+const envName = () => {
+  const s = useStore.getState();
+  return s.envs.find((e) => e.path === s.activeEnv)?.name;
+};
+
+/** Script console output goes to the Console drawer. */
+function logScripts(name: string, logs: ScriptLog[]) {
+  for (const l of logs) logConsole({ kind: "log", level: l.level, source: `${l.phase === "pre" ? "pre-request" : "post-response"} script`, title: `${name}: ${l.text}` });
 }
 
 export default function HttpPanel({ item }: { item: Item & HttpItem }) {
@@ -48,6 +71,9 @@ export default function HttpPanel({ item }: { item: Item & HttpItem }) {
   const [tab, setTab] = useState<ReqTab>(item.bodyMode !== "none" ? "body" : "params");
   const set = useCallback((patch: Partial<HttpItem>) => update(item.path, patch), [item.path, update]);
   const paneDir = usePaneDir();
+  const folders = useStore((s) => s.folders);
+  const trusted = useStore((s) => s.trustPrints && s.isTrusted(item));
+  const trustAsked = useStore((s) => s.trustAsked);
 
   const send = useCallback(() => {
     if (resp?.loading && resp.requestId) http.cancel(resp.requestId);
@@ -121,6 +147,17 @@ export default function HttpPanel({ item }: { item: Item & HttpItem }) {
           )}
         </button>
       </div>
+      {!trusted && trustAsked && (
+        <div className="row" style={{ padding: "6px 14px", borderBottom: "1px solid var(--line)", fontSize: 12 }}>
+          <ShieldAlert size={13} className="warn" />
+          <span className="muted grow">
+            Not trusted yet: imported, or new or changed outside Forge since you last trusted it. Forge asks before {item.preScript?.trim() || item.postScript?.trim() ? "scripts or AI send" : "AI sends"} anything to hosts only untrusted requests use. Editing it trusts it.
+          </span>
+          <button className="btn ghost sm" onClick={() => useStore.getState().trust([item.path])}>
+            Trust
+          </button>
+        </div>
+      )}
       <Split
         id={`http-${paneDir}`}
         dir={paneDir}
@@ -135,6 +172,7 @@ export default function HttpPanel({ item }: { item: Item & HttpItem }) {
                 { id: "auth", label: item.auth.type === "none" ? "Auth" : <>Auth <span className="tab-note">{AUTH_SHORT[item.auth.type]}</span></> },
                 { id: "body", label: isGql ? "GraphQL" : item.bodyMode === "none" ? "Body" : <>Body <span className="tab-note">{BODY_MODES.find((m) => m.id === item.bodyMode)?.short}</span></> },
                 { id: "tests", label: "Tests", count: item.assertions.length + item.extractions.length },
+                { id: "scripts", label: "Scripts", count: [item.preScript, item.postScript].filter((x) => x?.trim()).length },
                 { id: "docs", label: item.description?.trim() ? <>Docs <span className="tab-note">✓</span></> : "Docs" },
                 { id: "settings", label: "Settings" },
               ]}
@@ -142,9 +180,10 @@ export default function HttpPanel({ item }: { item: Item & HttpItem }) {
             <div className="scroll grow" style={{ display: "flex", flexDirection: "column" }}>
               {tab === "params" && <ParamsEditor item={item} onParams={onParams} set={set} />}
               {tab === "headers" && <HeadersEditor item={item} set={set} />}
-              {tab === "auth" && <AuthEditor auth={item.auth} onChange={(auth) => set({ auth })} />}
+              {tab === "auth" && <AuthEditor auth={item.auth} onChange={(auth) => set({ auth })} inherited={resolveAuth(item.path, { type: "inherit" }, folders)} onOpenFolder={(p) => useStore.getState().openTab(folderTab(p))} />}
               {tab === "body" && <BodyEditor item={item} set={set} />}
               {tab === "tests" && <TestsEditor item={item} set={set} />}
+              {tab === "scripts" && <ScriptsEditor item={item} set={set} path={item.path} />}
               {tab === "docs" && <DocsEditor item={item} set={set} />}
               {tab === "settings" && <SettingsEditor item={item} set={set} />}
             </div>
@@ -153,6 +192,68 @@ export default function HttpPanel({ item }: { item: Item & HttpItem }) {
         b={<ResponseView path={item.path} />}
       />
       {showCode && <CodeModal item={item} onClose={() => setShowCode(false)} />}
+    </div>
+  );
+}
+
+const SNIPPETS: Record<"pre" | "post", { label: string; code: string }[]> = {
+  pre: [
+    { label: "Set a variable", code: 'pm.environment.set("name", "value");' },
+    { label: "Add a header", code: 'pm.request.headers.upsert({ key: "X-Request-Id", value: crypto.randomUUID() });' },
+    { label: "Timestamp", code: 'pm.environment.set("timestamp", String(Date.now()));' },
+  ],
+  post: [
+    { label: "Status is 200", code: 'pm.test("Status is 200", () => {\n  pm.response.to.have.status(200);\n});' },
+    { label: "Check a field", code: 'pm.test("Has an id", () => {\n  pm.expect(pm.response.json()).to.have.property("id");\n});' },
+    { label: "Response time", code: 'pm.test("Responds in under 500 ms", () => {\n  pm.expect(pm.response.responseTime).to.be.below(500);\n});' },
+    { label: "Save from response", code: 'const data = pm.response.json();\npm.environment.set("id", data.id);' },
+    { label: "Log the body", code: "console.log(pm.response.json());" },
+  ],
+};
+
+type Scripted = { preScript?: string; postScript?: string };
+
+/** Pre-request and post-response scripts, for a request or a folder; `path` lists folder scripts that run first. */
+export function ScriptsEditor({ item, set, path }: { item: Scripted; set: (p: Scripted) => void; path?: string }) {
+  const folders = useStore((s) => s.folders);
+  const [phase, setPhase] = useState<"pre" | "post">(() => (item.preScript?.trim() && !item.postScript?.trim() ? "pre" : "post"));
+  const before = path ? scriptChain(path, {}, phase, folders).map((s) => s.label) : [];
+  const key = phase === "pre" ? "preScript" : "postScript";
+  const code = item[key] ?? "";
+  const add = (snippet: string) => set({ [key]: code.trim() ? `${code.replace(/\s+$/, "")}\n\n${snippet}\n` : `${snippet}\n` });
+  return (
+    <div className="col" style={{ flex: 1, minHeight: 0, gap: 0 }}>
+      <div className="row pad" style={{ paddingBottom: 6, flexWrap: "wrap" }}>
+        <Seg
+          value={phase}
+          onChange={setPhase}
+          options={[
+            { id: "pre", label: item.preScript?.trim() ? <>Pre-request <span className="tab-note">✓</span></> : "Pre-request" },
+            { id: "post", label: item.postScript?.trim() ? <>Post-response <span className="tab-note">✓</span></> : "Post-response" },
+          ]}
+        />
+        <div className="spacer" />
+        {SNIPPETS[phase].map((s) => (
+          <button key={s.label} className="btn ghost sm" onClick={() => add(s.code)} title={s.code}>
+            <Plus size={12} /> {s.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ flex: 1, minHeight: 160, display: "flex" }}>
+        <Editor
+          lang="js"
+          value={code}
+          onChange={(v) => set({ [key]: v })}
+          placeholder={
+            phase === "pre"
+              ? "// Runs before the request is sent. Postman (pm.*) and Bruno (bru, req) scripts work.\npm.environment.set(\"timestamp\", String(Date.now()));"
+              : "// Runs after the response arrives. Results show in the response's Tests tab.\npm.test(\"Status is 200\", () => pm.response.to.have.status(200));"
+          }
+        />
+      </div>
+      <div className="muted" style={{ padding: "6px 14px", fontSize: 11.5 }}>
+        {before.length ? `Runs after ${before.join(", then ")}. ` : ""}Runs sandboxed, with no network or file access. console.log goes to the Console. Variables you set are saved to the active environment's local secrets file.
+      </div>
     </div>
   );
 }
@@ -214,8 +315,10 @@ function ParamsEditor({ item, onParams, set }: { item: HttpItem; onParams: (p: K
   );
 }
 
-function HeadersEditor({ item, set }: { item: HttpItem; set: (p: Partial<HttpItem>) => void }) {
+function HeadersEditor({ item, set }: { item: Item & HttpItem; set: (p: Partial<HttpItem>) => void }) {
+  const folders = useStore((s) => s.folders);
   const present = new Set(item.headers.map((h) => h.key.trim().toLowerCase()));
+  const inherited = inheritedHeaders(item.path, item.headers, folders).map((h) => ({ key: h.key, value: h.value, note: `from folder "${basename(h.from)}"` }));
   const quick = QUICK_HEADERS.filter(([k]) => !present.has(k.toLowerCase()));
   const add = (rows: KV[]) => set({ headers: [...item.headers, ...rows] });
   return (
@@ -225,7 +328,7 @@ function HeadersEditor({ item, set }: { item: HttpItem; set: (p: Partial<HttpIte
       keyPh="Header"
       keyOptions={COMMON_HEADERS}
       valueOptions={headerValues}
-      auto={autoHeaders(item)}
+      auto={[...inherited, ...autoHeaders({ ...item, auth: resolveAuth(item.path, item.auth, folders).auth })]}
       toolbar={
         <>
           <SuggestButton item={item} kind="headers" onAdd={add} />
@@ -240,7 +343,7 @@ function HeadersEditor({ item, set }: { item: HttpItem; set: (p: Partial<HttpIte
   );
 }
 
-function BodyEditor({ item, set }: { item: HttpItem; set: (p: Partial<HttpItem>) => void }) {
+function BodyEditor({ item, set }: { item: Item & HttpItem; set: (p: Partial<HttpItem>) => void }) {
   const lang: Lang = item.bodyMode === "json" ? "json" : item.bodyMode === "xml" ? "xml" : "text";
   const format = () => {
     try {
@@ -296,7 +399,7 @@ function BodyEditor({ item, set }: { item: HttpItem; set: (p: Partial<HttpItem>)
         <Split
           id="gql"
           dir="v"
-          a={<Editor value={item.graphql.query} onChange={(query) => set({ graphql: { ...item.graphql, query } })} lang="graphql" placeholder="query { viewer { id name } }" />}
+          a={<GraphQLEditor item={item} value={item.graphql.query} onChange={(query) => set({ graphql: { ...item.graphql, query } })} />}
           b={
             <>
               <div className="row" style={{ padding: "6px 12px" }}>
@@ -420,6 +523,7 @@ function DocsEditor({ item, set }: { item: HttpItem; set: (p: Partial<HttpItem>)
       ) : (
         <p className="muted" style={{ margin: 0 }}>No description yet.</p>
       )}
+      <ExamplesEditor item={item} set={set} />
     </div>
   );
 }
@@ -481,14 +585,88 @@ function ClientCertFields({ value, onChange }: { value?: ClientCert; onChange: (
   );
 }
 
-export function ResponseView({ path }: { path: string }) {
-  const r = useStore((s) => s.responses[path]);
+function saveExample(item: Item & HttpItem, res: HttpResponse) {
+  const st = useStore.getState();
+  try {
+    const ex = exampleFromResponse(res, uniqueExampleName(`${res.status} ${res.statusText || STATUS_TEXT[res.status] || ""}`.trim(), item.examples), secretValues());
+    st.updateItem(item.path, { examples: [...(item.examples ?? []), ex] });
+    st.notify(`Saved as example "${ex.name}". Find it in the Docs tab.`);
+  } catch (e) {
+    st.notify(e instanceof Error ? e.message : String(e), "error");
+  }
+}
+
+function ExamplesEditor({ item, set }: { item: HttpItem; set: (p: Partial<HttpItem>) => void }) {
+  const list = item.examples ?? [];
+  const [open, setOpen] = useState<number | null>(null);
+  const upd = (i: number, p: Partial<ResponseExample>) => set({ examples: list.map((e, j) => (j === i ? { ...e, ...p } : e)) });
+  return (
+    <div className="col" style={{ gap: 6, marginTop: 14 }}>
+      <div className="row">
+        <h3 className="grow">Examples</h3>
+        <span className="muted" style={{ fontSize: 12 }}>
+          Save one from a response with <BookmarkPlus size={12} style={{ verticalAlign: -2 }} />. The first is shown in docs and served by the mock server.
+        </span>
+      </div>
+      {!list.length && <div className="muted">No examples yet.</div>}
+      {list.map((ex, i) => {
+        const ctype = contentTypeOf(ex);
+        return (
+          <div key={i} className="card" style={{ padding: 0 }}>
+            <div className="row" style={{ padding: "6px 10px", cursor: "pointer" }} onClick={() => setOpen(open === i ? null : i)}>
+              <ChevronRight size={12} className="dim" style={{ transform: open === i ? "rotate(90deg)" : undefined }} />
+              <span className={statusClass(ex.status)}>{ex.status}</span>
+              <input className="input grow" value={ex.name} onClick={(e) => e.stopPropagation()} onChange={(e) => upd(i, { name: e.target.value })} />
+              {i === 0 ? (
+                <span className="tag">default</span>
+              ) : (
+                <button className="btn ghost sm" onClick={(e) => (e.stopPropagation(), set({ examples: [ex, ...list.filter((_, j) => j !== i)] }))}>
+                  Make default
+                </button>
+              )}
+              <button className="btn ghost icon sm" title="Delete example" onClick={(e) => (e.stopPropagation(), set({ examples: list.filter((_, j) => j !== i) }))}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+            {open === i && (
+              <div className="col" style={{ padding: "0 10px 10px", gap: 6 }}>
+                <div className="row">
+                  <label className="check">
+                    Status
+                    <input className="input mono" style={{ width: 70 }} type="number" value={ex.status} onChange={(e) => upd(i, { status: Number(e.target.value) || 200 })} />
+                  </label>
+                  <label className="check grow">
+                    Content-Type
+                    <input
+                      className="input mono grow"
+                      value={ctype}
+                      onChange={(e) => upd(i, { headers: [...ex.headers.filter((h) => h.key.toLowerCase() !== "content-type"), ...(e.target.value ? [kv("Content-Type", e.target.value)] : [])] })}
+                    />
+                  </label>
+                </div>
+                <div style={{ height: 220, display: "flex" }}>
+                  <Editor value={ex.body} onChange={(body) => upd(i, { body })} lang={/json/.test(ctype) ? "json" : /xml/.test(ctype) ? "xml" : /html/.test(ctype) ? "html" : "text"} />
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A request's latest response, or a given one (a history entry) when `state` is passed. */
+export function ResponseView({ path, state }: { path: string; state?: ResponseState }) {
+  const live = useStore((s) => s.responses[path]);
+  const r = state ?? live;
   const item = useStore((s) => s.items[path]) as (Item & HttpItem) | undefined;
   const shape = useShape(r?.res);
   const [tab, setTab] = useState<ResTab>("body");
   const [view, setView] = useState<"pretty" | "raw" | "preview">("pretty");
   const ctype = r?.res?.headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "";
   const pretty = useMemo(() => (r?.res && !r.res.bodyBase64 ? prettyBody(r.res.body, ctype) : ""), [r?.res, ctype]);
+  const earlier = useHistory((s) => s.entries.some((e) => e.path === path && e.res && e.id !== r?.historyId));
 
   if (!r) return <div className="empty">Send a request to see the response here.</div>;
   if (r.loading)
@@ -526,6 +704,16 @@ export function ResponseView({ path }: { path: string }) {
         {!!r.results?.length && <span className={passed === r.results.length ? "ok" : "err"}>{`${passed}/${r.results.length} tests`}</span>}
         <div className="spacer" />
         <PaneLayoutToggle />
+        {res.headers.some((h) => h.key.toLowerCase() === "set-cookie") && (
+          <button className="btn ghost icon sm" title="This response set cookies. Manage cookies" onClick={openCookies}>
+            <Cookie size={13} />
+          </button>
+        )}
+        {item?.kind === "http" && !res.bodyBase64 && (
+          <button className="btn ghost icon sm" title="Save as example: kept with the request, shown in docs and served by the mock server" onClick={() => saveExample(item, res)}>
+            <BookmarkPlus size={13} />
+          </button>
+        )}
         <button className="btn ghost icon sm" title="Copy body" onClick={() => writeText(res.body).then(() => useStore.getState().notify("Copied"))}>
           <Copy size={13} />
         </button>
@@ -538,6 +726,7 @@ export function ResponseView({ path }: { path: string }) {
           ...(shape ? [{ id: "data" as ResTab, label: "Data", count: shape.datasets[0].rows.length }] : []),
           { id: "headers", label: "Headers", count: res.headers.length },
           { id: "tests", label: "Tests", count: r.results?.length },
+          ...(path && earlier ? [{ id: "compare" as ResTab, label: "Compare" }] : []),
         ]}
         right={
           tab === "body" && (
@@ -562,6 +751,7 @@ export function ResponseView({ path }: { path: string }) {
         ))}
       {tab === "data" && shape && <DataView key={path} shape={shape} res={res} name={item?.name ?? "Response"} req={{ method: item?.method ?? "GET", url: item?.url ?? "" }} />}
       {tab === "data" && !shape && <div className="empty">This response has no JSON data to tabulate.</div>}
+      {tab === "compare" && <CompareView path={path} current={res} currentId={r.historyId} />}
       {tab === "headers" && (
         <div className="scroll">
           <table className="kv selectable">

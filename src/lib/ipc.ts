@@ -30,12 +30,16 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
+/** Called after every request the engine sends (e.g. to save cookies the response set). */
+export const afterSend = new Set<() => void>();
+
 /** Sends through the Rust HTTP engine and records the exchange in the Console. */
 async function send(id: string, request: RawRequest, source = "app"): Promise<HttpResponse> {
   const entry = logConsole({ kind: "http", level: "info", source, title: `${request.method} ${request.url}`, status: "…", request });
   try {
     const res = await invoke<HttpResponse>("http_send", { id, request });
     useConsole.getState().patch(entry, { status: res.status, ms: res.timeMs, size: res.size, response: res, level: res.status >= 500 ? "error" : res.status >= 400 ? "warn" : "info" });
+    afterSend.forEach((f) => f());
     return res;
   } catch (e) {
     useConsole.getState().patch(entry, { status: "failed", level: "error", detail: String(e) });
@@ -122,6 +126,9 @@ export const fs = {
   importRead: (paths: string[]) => invoke<{ path: string; content: string }[]>("import_read", { paths }),
   readSettings: () => invoke<string>("settings_read"),
   writeSettings: (content: string) => invoke<void>("settings_write", { content }),
+  /** Forge's private app-data files (history, cookies), outside every workspace. */
+  readAppData: (name: string) => invoke<string>("appdata_read", { name }),
+  writeAppData: (name: string, content: string) => invoke<void>("appdata_write", { name, content }),
 };
 
 /** Splits a command-line string into args, honouring quotes and backslash escapes like a POSIX shell. */

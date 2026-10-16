@@ -17,6 +17,7 @@ No account, no cloud, no telemetry. Your work is plain files in a folder you cho
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-7c6cff.svg)](LICENSE)
 [![CI](https://github.com/stellitron/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/stellitron/forge/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/stellitron/forge?color=22d3ee)](https://github.com/stellitron/forge/releases/latest)
+[![VirusTotal](https://img.shields.io/endpoint?url=https%3A%2F%2Fforge.stellitron.com%2Fvirustotal-badge.json)](https://github.com/stellitron/forge/releases/latest)
 
 <img src="docs/images/request-dark.png" alt="Forge showing a GET request with its JSON response" width="900">
 

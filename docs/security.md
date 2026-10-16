@@ -6,7 +6,25 @@ Forge holds API tokens and can be driven by AI, so it is designed to keep secret
 
 - **Two files per environment.** Shared values go in `name.json`, which you commit. Secrets go in `name.local.json`, which Forge adds to `.gitignore`.
 - **Imports split credentials.** When importing environments, values that look like credentials (by name such as `token` or `password`, by shape such as JWTs or long random keys, or marked secret by the source tool) go to the local file.
-- **Captured values are secrets.** Values captured from responses, such as login tokens, are written to the local file.
+- **Captured values are secrets.** Values captured from responses, such as login tokens, are written to the local file. So are variables set by scripts.
+- **Scripts are sandboxed and watched.** Request scripts run with no network, file or module access. A script can still edit its request or set variables, so Forge asks before a script sends a request to a new host, attaches a secret to a host that doesn't normally receive it, or points a variable like `{{baseUrl}}` somewhere new. The CLI blocks these unless run with `--trust-scripts`.
+- **Collections don't vouch for themselves.** See Workspace trust below.
+- **History and cookies stay on this computer.** Both are kept in Forge's private app-data folder, never in the workspace. History stores secret values as their `{{placeholders}}` and hides credentials typed directly into headers.
+- **Folder settings take part in trust.** A request is only trusted if the settings of the folders above it are too, so a changed `_folder.json` (for example a new `{{baseUrl}}` from a git pull) can't redirect trusted requests.
+- **The mock server only answers local pages.** It listens on `127.0.0.1`, checks the Host header, and refuses browser requests from origins other than `localhost` and the ones you allow, because any website open in your browser runs on your computer too.
+- **Scripts send requests through Forge.** `pm.sendRequest` is checked like an AI-built request: new hosts and secrets going somewhere new need your OK.
+
+## Workspace trust
+
+Some checks ask whether a host is one of yours: the script guard, and the guard on AI-built requests. A host counts as yours when a request or environment you **trust** uses it. Otherwise any collection could make its own server look trusted, just by including a request to it.
+
+- **The first time you open a workspace** Forge didn't create, it asks whether you trust its authors. Choose **Not now** for repos you don't control.
+- **Trust follows content, not files.** Forge remembers a fingerprint of each trusted request's URL, headers, auth, body and scripts in its own settings, outside the workspace. A collection can't trust itself through its files, by arriving through git, or by changing after you trusted it.
+- **Changes from outside Forge aren't trusted** until you look at them, for example requests that are new or changed after a `git pull`. The sidebar shows how many there are, with **Trust all**.
+- **Imported requests, and requests the AI saves, start out untrusted.**
+- **To trust:** edit the request, or use **Trust** on the request's notice, on the import summary, on a folder (**Trust requests in this folder**) or in the sidebar. Renaming, moving and AI-written descriptions don't change trust.
+- **Trust only decides what Forge asks about.** Untrusted requests still work. You're just asked first before a script or the AI sends something to a host that only untrusted requests use.
+- **The CLI trusts the repo it runs**, as any test runner does. Don't run `forge` with secrets on code you don't trust, such as pull requests from forks.
 - **Typed tokens are flagged.** A literal token in the Auth tab shows a warning and a one-click move into secrets.
 - **The console masks credentials** until you choose to reveal them.
 - **AI keys stay in app settings,** outside every workspace, in a file only your user can read.

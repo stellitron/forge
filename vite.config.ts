@@ -1,7 +1,8 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-// @ts-expect-error type error without @types/node package
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
@@ -28,5 +29,10 @@ export default defineConfig(() => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+  },
+  test: {
+    // graphql refuses objects from a second copy. The app bundle has one; in tests, point every
+    // import at the CommonJS build that graphql-language-service require()s.
+    alias: { graphql: fileURLToPath(new URL("./node_modules/graphql/index.js", import.meta.url)) },
   },
 }));

@@ -1,6 +1,7 @@
 import { parse as parseYaml } from "yaml";
-import { importCurl, importPostman, importPostmanEnv, oauth2, oauthGrant, type Imported } from "./importers";
-import { defaults, kv, type AssertOp, type Assertion, type Auth, type HttpItem, type KV } from "./types";
+import { importCurl, importPostman, importPostmanEnv, joinScripts, oauth2, oauthGrant, type Imported } from "./importers";
+import { defaults, emptyFolder, kv, type AssertOp, type Assertion, type Auth, type FolderSettings, type HttpItem, type KV, type ResponseExample } from "./types";
+import { STATUS_TEXT } from "./examples";
 import { skeleton } from "../components/ui";
 
 /**
@@ -17,6 +18,8 @@ export interface ImportedCollection {
   name: string;
   format: string;
   items: Imported[];
+  /** Folder settings by folder path relative to the collection ("" is the collection itself). */
+  folders?: Record<string, FolderSettings>;
 }
 
 export interface ImportedEnv {
@@ -61,7 +64,7 @@ const basename = (p: string) => p.split("/").pop()!.replace(/\.[^.]+$/, "");
 /** Insomnia writes `{{ _.name }}` / `{{_['name']}}`; everyone else writes `{{name}}`. */
 const vars = (s: string) => s.replace(/\{\{\s*_\.([\w.-]+)\s*\}\}/g, "{{$1}}").replace(/\{\{\s*_\[['"]([^'"]+)['"]\]\s*\}\}/g, "{{$1}}");
 
-function setBody(d: HttpItem, mime: string, text: string) {
+export function setBody(d: HttpItem, mime: string, text: string) {
   d.body = text;
   d.bodyMode = /json/i.test(mime) || (!mime && /^\s*[[{]/.test(text)) ? "json" : /xml/i.test(mime) ? "xml" : "text";
   if (mime && !d.headers.some((h) => h.key.toLowerCase() === "content-type")) d.headers.push(kv("Content-Type", mime));
@@ -148,11 +151,40 @@ export function fromOpenApi(spec: any): { name: string; items: Imported[]; baseU
       }
       const ok = Object.keys(op.responses ?? {}).find((c) => /^2/.test(c));
       if (ok) d.assertions = [{ enabled: true, source: "status", path: "", op: "eq", value: ok }];
+      const examples = openApiExamples(resolve(op.responses ?? {}));
+      if (examples.length) d.examples = examples;
       if (str(op.description).trim()) d.description = str(op.description).trim();
       items.push({ name: op.summary || op.operationId || `${d.method} ${path}`, folder: op.tags?.[0] ?? "", data: d });
     }
   }
   return { name: spec.info?.title || "OpenAPI", items, baseUrl };
+}
+
+/**
+ * Response examples from an operation's (resolved) responses: named examples, a single example,
+ * or a skeleton built from the schema, so a spec alone is enough to run a mock server.
+ */
+export function openApiExamples(responses: Record<string, any>): ResponseExample[] {
+  const out: ResponseExample[] = [];
+  const add = (status: number, mime: string, value: unknown, label?: string) =>
+    out.push({ name: `${status}${label ? ` ${label}` : STATUS_TEXT[status] ? ` ${STATUS_TEXT[status]}` : ""}`, status, headers: mime ? [kv("Content-Type", mime)] : [], body: value === undefined ? "" : typeof value === "string" && !/json/.test(mime) ? value : JSON.stringify(value, null, 2) });
+  for (const [code, r] of Object.entries<any>(responses ?? {})) {
+    if (!/^\d{3}$/.test(code) || !r || typeof r !== "object") continue;
+    const status = Number(code);
+    const content = r.content ?? {};
+    const mime = Object.keys(content).find((m) => /json/.test(m)) ?? Object.keys(content)[0];
+    if (mime) {
+      const c = content[mime] ?? {};
+      const named = Object.entries<any>(c.examples ?? {});
+      if (named.length) for (const [n, e] of named) add(status, mime, e?.value, str(e?.summary) || n);
+      else add(status, mime, c.example ?? (c.schema ? skeleton(c.schema) : undefined));
+    } else if (r.examples && typeof r.examples === "object") {
+      // Swagger 2: examples keyed by MIME type.
+      for (const [m, v] of Object.entries<any>(r.examples)) add(status, m, v);
+    } else if (r.schema) add(status, "application/json", skeleton(r.schema));
+    else add(status, "", undefined);
+  }
+  return out;
 }
 
 // ───────────────────────── Insomnia ─────────────────────────
@@ -206,6 +238,11 @@ function insomniaRequest(r: any): HttpItem {
     d.bodyMode = "binary";
     d.body = str(b.fileName);
   } else if (b.text != null) setBody(d, mime, vars(str(b.text)));
+  // Insomnia's scripting API mirrors Postman's (insomnia.* ≈ pm.*); Forge runs both.
+  const pre = str(r.preRequestScript ?? r.scripts?.preRequest);
+  const post = str(r.afterResponseScript ?? r.scripts?.afterResponse);
+  if (pre.trim()) d.preScript = pre.trim();
+  if (post.trim()) d.postScript = post.trim();
   return d;
 }
 
@@ -320,10 +357,29 @@ function bruAssertion(k: string, v: string, enabled: boolean): Assertion | null 
 
 function bruAuth(blocks: BruBlock[], mode: string): Auth {
   const get = (name: string, key: string) => blocks.find((b) => b.name === name)?.dict.find((x) => x.key === key)?.value ?? "";
+  if (mode === "inherit") return { type: "inherit" };
   if (mode === "bearer") return { type: "bearer", token: get("auth:bearer", "token") };
   if (mode === "basic") return { type: "basic", username: get("auth:basic", "username"), password: get("auth:basic", "password") };
   if (mode === "apikey") return { type: "apikey", key: get("auth:apikey", "key"), value: get("auth:apikey", "value"), in: get("auth:apikey", "placement") === "queryparams" ? "query" : "header" };
   return { type: "none" };
+}
+
+/** collection.bru or folder.bru as Forge folder settings: auth, headers, variables and scripts. */
+function bruFolder(src: string): FolderSettings | null {
+  const blocks = parseBru(src);
+  const block = (n: string) => blocks.find((b) => b.name === n);
+  const mode = block("auth")?.dict.find((x) => x.key === "mode")?.value;
+  const s = bruScripts(blocks);
+  const f: FolderSettings = { ...emptyFolder(), auth: mode && mode !== "none" ? bruAuth(blocks, mode) : mode === "none" ? { type: "none" } : { type: "inherit" }, headers: block("headers")?.dict ?? [], vars: block("vars:pre-request")?.dict ?? [] };
+  if (s.pre.trim()) f.preScript = s.pre.trim();
+  if (s.post.trim()) f.postScript = s.post.trim();
+  return f.auth.type !== "inherit" || f.headers.length || f.vars.length || f.preScript || f.postScript ? f : null;
+}
+
+/** Bruno's script blocks; its tests block runs after the post-response script. */
+function bruScripts(blocks: BruBlock[]): { pre: string; post: string } {
+  const text = (n: string) => blocks.find((b) => b.name === n)?.text ?? "";
+  return { pre: text("script:pre-request"), post: joinScripts([{ label: "Post-response", code: text("script:post-response") }, { label: "Tests", code: text("tests") }]) ?? "" };
 }
 
 const BRU_METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace", "connect"];
@@ -363,6 +419,9 @@ export function bruRequest(src: string): { name: string; seq: number; data: Http
     });
   }
   d.assertions = (block("assert")?.dict ?? []).map((a) => bruAssertion(a.key, a.value, a.enabled)).filter((a): a is Assertion => !!a);
+  const s = bruScripts(blocks);
+  if (s.pre.trim()) d.preScript = s.pre.trim();
+  if (s.post.trim()) d.postScript = s.post.trim();
   return { name: meta?.dict.find((x) => x.key === "name")?.value || "Request", seq: Number(meta?.dict.find((x) => x.key === "seq")?.value ?? 0), data: d };
 }
 
@@ -395,7 +454,13 @@ function fromBrunoFiles(files: Source[]): ImportResult {
       out.envs.push(splitEnv(basename(rel), vars));
       continue;
     }
-    if (/(^|\/)(folder|collection)\.bru$/.test(rel)) continue;
+    // collection.bru and folder.bru hold settings their folder passes down.
+    const settings = /(^|\/)(folder|collection)\.bru$/.test(rel) ? bruFolder(f.content) : undefined;
+    if (settings !== undefined) {
+      const c = col(root);
+      if (settings) (c.folders ??= {})[rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : ""] = settings;
+      continue;
+    }
     const r = bruRequest(f.content);
     if (!r) {
       out.skipped.push(f.path);
@@ -450,6 +515,10 @@ function fromBrunoJson(doc: any): ImportResult {
           d.multipart = (b.multipartForm ?? []).map((f: any) => ({ ...kv(f.name, Array.isArray(f.value) ? str(f.value[0]) : str(f.value), f.enabled !== false), file: f.type === "file" }));
         }
         d.assertions = (r.assertions ?? []).map((x: any) => bruAssertion(x.name, str(x.value), x.enabled !== false)).filter(Boolean);
+        const pre = str(r.script?.req).trim();
+        const post = joinScripts([{ label: "Post-response", code: str(r.script?.res) }, { label: "Tests", code: str(r.tests) }]);
+        if (pre) d.preScript = pre;
+        if (post) d.postScript = post;
         col.items.push({ name: str(it.name) || "Request", folder, data: d });
       } else out.skipped.push(`${it.name} (${it.type})`);
     }
@@ -573,7 +642,7 @@ export function importAny(sources: Source[]): ImportResult {
     try {
       if (kind === "Postman") {
         const p = importPostman(doc);
-        out = merge(out, { collections: [{ name: p.name, format: "Postman", items: p.items }], envs: p.variables.length ? [splitEnv(`${p.name} variables`, p.variables)] : [], skipped: [] });
+        out = merge(out, { collections: [{ name: p.name, format: "Postman", items: p.items, folders: p.folders }], envs: p.variables.length ? [splitEnv(`${p.name} variables`, p.variables)] : [], skipped: [] });
       } else if (kind === "Postman environment") {
         const e = importPostmanEnv(doc);
         // Postman marks credentials with type "secret".

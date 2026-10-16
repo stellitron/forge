@@ -36,3 +36,6 @@ dist-ssr
 
 # Command-line runner build
 dist-cli
+
+# TypeScript incremental build info
+*.tsbuildinfo

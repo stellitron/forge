@@ -5,6 +5,13 @@ import { footer, json, junit, line } from "./report";
 import { masker, readData, runCollection, UsageError, type RunOptions } from "./run";
 
 import { VERSION } from "./version";
+import { setScriptHost } from "../lib/scripts";
+import { nodeScriptHost } from "./scriptHost";
+
+setScriptHost(nodeScriptHost);
+// Running `forge run` on a checkout trusts that repo, as any test runner does; the script guard
+// still stops requests to hosts no saved request uses.
+useStore.setState({ trustEverything: true });
 
 const HELP = `Forge ${VERSION}: run saved API requests and their tests.
 
@@ -24,6 +31,7 @@ Options
       --timeout <ms>      Override every request's timeout
       --delay <ms>        Wait between requests
   -k, --insecure          Skip TLS certificate checks
+      --trust-scripts     Let scripts send requests or set variables that point at hosts your saved requests don't use
       --no-color          Plain output
   -h, --help              Show this help
   -v, --version           Show the version
@@ -64,7 +72,7 @@ interface Parsed {
 }
 
 const ALIASES: Record<string, string> = { w: "workspace", e: "env", n: "iterations", d: "data", r: "reporter", o: "output", k: "insecure", h: "help", v: "version" };
-const BOOLEAN = new Set(["bail", "insecure", "help", "version", "no-color"]);
+const BOOLEAN = new Set(["bail", "insecure", "trust-scripts", "help", "version", "no-color"]);
 
 export function parseArgs(argv: string[]): Parsed {
   const p: Parsed = { command: "", paths: [], flags: {}, vars: {} };
@@ -128,6 +136,7 @@ export async function cli(argv: string[], io: Io): Promise<number> {
       bail: !!p.flags.bail,
       timeoutMs: num(p.flags.timeout, "timeout"),
       insecure: !!p.flags.insecure,
+      trustScripts: !!p.flags["trust-scripts"],
       delayMs: num(p.flags.delay, "delay") ?? 0,
     };
     const useColor = io.isTTY && !p.flags["no-color"] && !io.env.NO_COLOR;
