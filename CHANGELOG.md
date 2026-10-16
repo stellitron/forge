@@ -4,6 +4,8 @@ All notable changes to Forge are listed here. The format follows [Keep a Changel
 
 ## Unreleased
 
+## 0.2.0 (2026-10-16)
+
 ### Added
 
 - Request history: every send, kept per workspace on this computer with secrets stored as placeholders. Open, send again or save as a request.

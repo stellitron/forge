@@ -106,7 +106,7 @@ export default function ChatPanel() {
       const answer = await a.ask(
         q,
         (e) => {
-        if (e.type === "text") patchLast((m) => ({ ...m, text: e.text }));
+        if (e.type === "delta") patchLast((m) => ({ ...m, text: m.text + e.text }));
         else if (e.type === "call") patchLast((m) => ({ ...m, steps: [...(m.steps ?? []), { id: e.id, name: e.name, input: e.input }] }));
         else if (e.type === "result") patchLast((m) => ({ ...m, steps: m.steps?.map((s) => (s.id === e.id ? { ...s, output: e.output, isError: e.isError } : s)) }));
         },
