@@ -32,6 +32,12 @@ async function open(query) {
   const page = await browser.newPage();
   await page.goto(`${BASE}/?${query}`, { waitUntil: "networkidle0" });
   await sleep(600);
+  // A fresh profile asks whether to trust the demo workspace; accept so it doesn't cover the shots.
+  const trust = await page.$('xpath/.//button[normalize-space()="Trust"]');
+  if (trust) {
+    await trust.click();
+    await sleep(400);
+  }
   return page;
 }
 
