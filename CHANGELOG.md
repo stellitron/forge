@@ -2,6 +2,17 @@
 
 All notable changes to Forge are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.2.2 (2026-10-19)
+
+### Changed
+
+- Sage, Stellitron's green, is the new default accent, with soft sage tones in light mode, so the app matches forge.stellitron.com. If you picked an accent before, it stays. Forge's previous purple is still in Settings, Appearance, now named Violet.
+- Responses arrive with a little motion: the status row rises in, the tests count lands when the tests finish, and test results appear one after another. A sweep runs across the response pane while a request is sending. Dialogs, menus and notifications ease in instead of appearing at once. All of this is off when your system asks for reduced motion.
+
+### Fixed
+
+- In a narrow window, the request and response tab rows no longer run into the neighbouring pane; they scroll sideways instead.
+
 ## 0.2.1 (2026-10-16)
 
 ### Changed
