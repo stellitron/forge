@@ -50,7 +50,15 @@
   color-scheme: light;
 }
 
-/* Palettes: accent colours, plus warm paper tones for Clay in light mode. */
+/* Palettes: accent colours, plus paper tones for Sage and Clay in light mode. */
+/* Sage is Stellitron's green and the default; accents keep white button text readable. */
+:root[data-palette="sage"] { --accent: #3f7a52; --accent-2: #4b8c5f; }
+:root[data-theme="light"][data-palette="sage"] {
+  --accent: #305d40; --accent-2: #264d34;
+  --bg: #f3f5ef; --bg-1: #fbfcf9; --bg-2: #edf0e8; --bg-3: #e3e8dc;
+  --line: #dce1d7; --line-2: #ccd4c5; --fg: #18251d; --fg-2: #4f5b51; --fg-3: #858f83;
+  --get: #2f7a45;
+}
 :root[data-palette="clay"] { --accent: #d97757; --accent-2: #e5957a; }
 :root[data-theme="light"][data-palette="clay"] {
   --accent: #c15f3c; --accent-2: #a94f30;
@@ -177,7 +185,10 @@ h3 { font-size: 12px; margin: 0; font-weight: 600; text-transform: uppercase; le
 .tab:hover .x, .tab.active .x { opacity: 0.7; }
 .tab .x:hover { background: var(--bg-3); opacity: 1; }
 
-.seg { display: flex; gap: 2px; border-bottom: 1px solid var(--line); padding: 0 12px; flex-shrink: 0; }
+.seg { display: flex; gap: 2px; border-bottom: 1px solid var(--line); padding: 0 12px; flex-shrink: 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* Narrow panes scroll their tabs sideways instead of spilling into the next pane. */
+.seg::-webkit-scrollbar { display: none; }
+.seg > button { flex-shrink: 0; }
 .seg button {
   background: none; border: none; padding: 9px 10px 8px; cursor: pointer; color: var(--fg-3);
   border-bottom: 2px solid transparent; margin-bottom: -1px; display: flex; gap: 6px; align-items: center;
@@ -626,3 +637,45 @@ table.data .link { color: var(--accent-2); }
 .import-issues li.issue-info::marker { color: var(--fg-3); }
 .import-ok { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ok, #22a06b); }
 .import-next { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px; border: 1px dashed var(--line-2); border-radius: 8px; font-size: 12.5px; line-height: 1.5; }
+
+/* Motion: the same easing and rhythm as forge.stellitron.com. Short, purposeful, and off for
+   people who ask for reduced motion. */
+:root { --ease-out: cubic-bezier(.2, .7, .2, 1); --spring: cubic-bezier(.3, 1.5, .5, 1); }
+
+/* A response arrives: the status row rises in, and the tests chip lands. */
+.status > * { animation: m-rise .32s var(--ease-out) both; }
+.status > :nth-child(2) { animation-delay: .04s; }
+.status > :nth-child(3) { animation-delay: .08s; }
+.status > :nth-child(4) { animation-delay: .12s; }
+.status > :nth-child(5) { animation: m-stamp .45s var(--spring) .2s both; }
+.result { animation: m-rise .3s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 50ms + 60ms); }
+.result > :first-child { animation: m-stamp .4s var(--spring) both; animation-delay: calc(var(--i, 0) * 50ms + 160ms); }
+
+/* Sending: a sweep across the top of the response pane. */
+.empty.sending { position: relative; overflow: hidden; }
+.empty.sending .sweep { position: absolute; top: 0; left: 0; height: 2px; width: 35%; background: var(--accent); border-radius: 2px; animation: m-sweep 1.1s ease-in-out infinite; }
+
+/* Surfaces ease in instead of snapping. */
+.modal-bg { animation: m-fade .18s ease-out; }
+.modal { animation: m-pop .24s var(--ease-out); }
+.menu, .suggest-list { animation: m-pop-sm .14s var(--ease-out); transform-origin: top left; }
+.toast { animation: m-toast .34s var(--spring); }
+.tab.active::after { animation: m-grow .25s var(--ease-out); }
+.panel { animation: m-fade .16s ease-out; }
+.btn { transition: background 0.12s, border-color 0.12s, transform .08s; }
+.btn:active:not(:disabled) { transform: scale(.97); }
+
+@keyframes m-rise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@keyframes m-stamp { from { opacity: 0; transform: scale(1.5); } to { opacity: 1; transform: none; } }
+@keyframes m-fade { from { opacity: 0; } }
+@keyframes m-pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes m-pop-sm { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes m-toast { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes m-grow { from { transform: scaleX(0); } }
+@keyframes m-sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .status > *, .result, .result > :first-child, .modal-bg, .modal, .menu, .suggest-list, .toast, .tab.active::after, .panel { animation: none; }
+  .empty.sending .sweep { display: none; }
+  .btn:active:not(:disabled) { transform: none; }
+}

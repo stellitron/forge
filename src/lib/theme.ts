@@ -1,21 +1,23 @@
 import { useEffect, useState } from "react";
 
 export type ThemeMode = "system" | "light" | "dark";
-export type Palette = "forge" | "clay" | "ocean" | "forest" | "rose";
+export type Palette = "sage" | "forge" | "clay" | "ocean" | "forest" | "rose";
 export interface Appearance {
   mode: ThemeMode;
   palette: Palette;
 }
 
 export const PALETTES: { id: Palette; label: string; dark: string; light: string }[] = [
-  { id: "forge", label: "Forge", dark: "#7c6cff", light: "#5b4cf0" },
+  // Sage matches forge.stellitron.com and stellitron.com, and is the default.
+  { id: "sage", label: "Sage", dark: "#3f7a52", light: "#305d40" },
+  { id: "forge", label: "Violet", dark: "#7c6cff", light: "#5b4cf0" },
   { id: "clay", label: "Clay", dark: "#d97757", light: "#c15f3c" },
   { id: "ocean", label: "Ocean", dark: "#3b82f6", light: "#2563eb" },
   { id: "forest", label: "Forest", dark: "#22c55e", light: "#15803d" },
   { id: "rose", label: "Rose", dark: "#f43f5e", light: "#e11d48" },
 ];
 
-export const DEFAULT_APPEARANCE: Appearance = { mode: "system", palette: "forge" };
+export const DEFAULT_APPEARANCE: Appearance = { mode: "system", palette: "sage" };
 const CACHE = "forge:appearance";
 const media = () => window.matchMedia?.("(prefers-color-scheme: dark)");
 
