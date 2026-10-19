@@ -671,7 +671,8 @@ export function ResponseView({ path, state }: { path: string; state?: ResponseSt
   if (!r) return <div className="empty">Send a request to see the response here.</div>;
   if (r.loading)
     return (
-      <div className="empty">
+      <div className="empty sending">
+        <span className="sweep" aria-hidden="true" />
         <Loader2 className="spin" size={22} />
         Sending…
       </div>
@@ -774,7 +775,7 @@ export function ResponseView({ path, state }: { path: string; state?: ResponseSt
         <div className="scroll">
           {!r.results?.length && <div className="empty">No assertions on this request.</div>}
           {r.results?.map((t, i) => (
-            <div className="result" key={i}>
+            <div className="result" key={i} style={{ ["--i" as string]: i }}>
               <span className={t.pass ? "ok" : "err"} style={{ fontWeight: 700, width: 36 }}>
                 {t.pass ? "PASS" : "FAIL"}
               </span>

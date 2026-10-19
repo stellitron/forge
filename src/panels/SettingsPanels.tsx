@@ -656,7 +656,9 @@ function ThemePreview({ mode, palette }: { mode: ThemeMode; palette: PaletteId }
       ? { bg: "#000", side: "#000", line: "#26262b", text: "#3a3a40", accent: p.dark }
       : palette === "clay"
         ? { bg: "#faf9f5", side: "#f4f3ee", line: "#e1ddd1", text: "#d8d3c6", accent: p.light }
-        : { bg: "#ffffff", side: "#f4f5f7", line: "#e3e5e8", text: "#dde0e4", accent: p.light };
+        : palette === "sage"
+          ? { bg: "#fbfcf9", side: "#f3f5ef", line: "#dce1d7", text: "#d7ddd0", accent: p.light }
+          : { bg: "#ffffff", side: "#f4f5f7", line: "#e3e5e8", text: "#dde0e4", accent: p.light };
     return (
       <div className="tp" style={{ background: c.bg, borderColor: c.line }}>
         <div className="tp-side" style={{ background: c.side, borderColor: c.line }}>

@@ -44,7 +44,7 @@ function seed() {
     lastWorkspace: "/preview/workspace",
     activeEnv: { "/preview/workspace": "environments/local.json" },
     ...(q.get("tour") === "0" ? { onboarded: true } : {}),
-    ...(theme ? { appearance: { mode: theme, palette: q.get("palette") ?? "forge" } } : {}),
+    ...(theme ? { appearance: { mode: theme, palette: q.get("palette") ?? "sage" } } : {}),
     // ?ai=demo marks AI as set up with a placeholder key, so the Ask UI can be checked without calling a model.
     ...(q.get("ai") === "demo" ? { agent: { provider: "openai", model: "demo", effort: "high" }, providers: { openai: { apiKey: "demo-not-a-key", baseUrl: "" } } } : {}),
   });

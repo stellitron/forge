@@ -5,7 +5,7 @@
 //
 // Uses your installed Chrome (set CHROME_PATH to override). The window is kept small so text in
 // the images stays readable when they are shown at page width. Docs get the default Forge look
-// (docs/images/); the website gets light and dark pairs in the Forest palette, which matches
+// (docs/images/); the website gets light and dark pairs in the Sage palette, which matches
 // stellitron.com (site/assets/). The preview sends real requests to jsonplaceholder.typicode.com.
 import { mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -102,8 +102,8 @@ await sleep(3000);
 await shoot(tour, "docs/images/onboarding.png");
 await tour.close();
 
-// Website: Forest palette, light and dark.
-await set("site/assets", "theme=light&palette=forest", "-light", true, ["request", "data"]);
-await set("site/assets", "theme=dark&palette=forest", "-dark", true, ["request", "data"]);
+// Website: Sage palette, light and dark.
+await set("site/assets", "theme=light&palette=sage", "-light", true, ["request", "data"]);
+await set("site/assets", "theme=dark&palette=sage", "-dark", true, ["request", "data"]);
 
 await browser.close();
